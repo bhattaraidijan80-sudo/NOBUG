@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Award,
   Calendar,
   ChevronLeft,
@@ -14,6 +15,7 @@ import {
   Search,
   Sparkles,
   Star,
+  Swords,
   Trophy,
   Users,
   X,
@@ -51,13 +53,14 @@ interface LightboxState {
 }
 
 export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
-  const [subTab, setSubTab] = useState<HofSubTab>('standings');
+  const [subTab, setSubTab] = useState<HofSubTab | 'head-to-head'>('standings');
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   // Standings filters
   const [standingsYear, setStandingsYear] = useState<string>('all');
   const [standingsSort, setStandingsSort] =
     useState<StandingsSortMode>('points');
+  const [showBonusLedger, setShowBonusLedger] = useState(false);
 
   // External Wins filters
   const [filterYear, setFilterYear] = useState<string>('');
@@ -72,6 +75,11 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
   const [synergySort, setSynergySort] = useState<
     'podiums' | 'first' | 'second' | 'third' | 'points' | 'qual-rate'
   >('podiums');
+
+  // Head-to-Head Compare filters (excludes standings points)
+  const [h2hYear, setH2hYear] = useState<string>('all');
+  const [h2hPlayerA, setH2hPlayerA] = useState<string>('');
+  const [h2hPlayerB, setH2hPlayerB] = useState<string>('');
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -103,31 +111,83 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
   }, [lightbox, selectedQuiz]);
 
   const computeAwardsForFilter = (yearFilter: string) => {
-    const base = computeStandings(quizzes, yearFilter, 'points');
+    const normalizedFilter = yearFilter.trim();
+    const scopedQuizzes =
+      normalizedFilter === 'all'
+        ? quizzes
+        : quizzes.filter((q) => (q.yearBS || '').trim() === normalizedFilter);
+
+    const base = computeStandings(scopedQuizzes, 'all', 'points');
     if (base.length === 0) return null;
 
-    const mostFirst = [...base].sort(
+    // 1. Gold Sovereign (must have >= 1 first place)
+    const goldCandidates = base.filter((r) => r.first > 0);
+    const goldSorted = [...goldCandidates].sort(
       (a, b) => b.first - a.first || b.points - a.points
-    )[0];
+    );
+    const topGold = goldSorted[0] || null;
+    const goldWinners = topGold
+      ? goldSorted.filter(
+          (r) => r.first === topGold.first && r.points === topGold.points
+        )
+      : [];
 
-    const eligibleQual = base.some((r) => r.totalQuizzes >= 2)
-      ? base.filter((r) => r.totalQuizzes >= 2)
-      : base;
-    const bestQual = [...eligibleQual].sort((a, b) => {
+    // 2. Clutch Qualifier (must have >= 1 qualified)
+    const qualPool = base.some((r) => r.totalQuizzes >= 2)
+      ? base.filter((r) => r.totalQuizzes >= 2 && r.qualified > 0)
+      : base.filter((r) => r.qualified > 0);
+    const qualSorted = [...qualPool].sort((a, b) => {
       const rateA = a.totalQuizzes > 0 ? a.qualified / a.totalQuizzes : 0;
       const rateB = b.totalQuizzes > 0 ? b.qualified / b.totalQuizzes : 0;
       if (rateB !== rateA) return rateB - rateA;
       return b.qualified - a.qualified || b.points - a.points;
-    })[0];
+    });
+    const topQual = qualSorted[0] || null;
+    const topQualRate =
+      topQual && topQual.totalQuizzes > 0
+        ? topQual.qualified / topQual.totalQuizzes
+        : 0;
+    const qualWinners = topQual
+      ? qualSorted.filter((r) => {
+          const rate = r.totalQuizzes > 0 ? r.qualified / r.totalQuizzes : 0;
+          return (
+            rate === topQualRate &&
+            r.qualified === topQual.qualified &&
+            r.points === topQual.points
+          );
+        })
+      : [];
 
-    const mostPodiums = [...base].sort((a, b) => {
+    // 3. Podium Regularity (must have >= 1 top-3 podium)
+    const podCandidates = base.filter(
+      (r) => r.first + r.second + r.third > 0
+    );
+    const podSorted = [...podCandidates].sort((a, b) => {
       const podA = a.first + a.second + a.third;
       const podB = b.first + b.second + b.third;
       if (podB !== podA) return podB - podA;
       return b.points - a.points;
-    })[0];
+    });
+    const topPod = podSorted[0] || null;
+    const topPodCount = topPod
+      ? topPod.first + topPod.second + topPod.third
+      : 0;
+    const podiumWinners = topPod
+      ? podSorted.filter(
+          (r) =>
+            r.first + r.second + r.third === topPodCount &&
+            r.points === topPod.points
+        )
+      : [];
 
-    return { mostFirst, bestQual, mostPodiums };
+    return {
+      mostFirst: topGold,
+      goldWinners,
+      bestQual: topQual,
+      qualWinners,
+      mostPodiums: topPod,
+      podiumWinners,
+    };
   };
 
   const seasonAwards = useMemo(
@@ -135,34 +195,64 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     [quizzes, standingsYear]
   );
 
-  const awardBonusMap = useMemo(() => {
-    const map = new Map<string, number>();
-    const grantAwards = (awards: ReturnType<typeof computeAwardsForFilter>) => {
+  const awardDetailsMap = useMemo(() => {
+    const map = new Map<string, { total: number; items: string[] }>();
+    const addEntry = (player: string, label: string) => {
+      const existing = map.get(player) || { total: 0, items: [] };
+      existing.total += 3;
+      existing.items.push(`${label} (+3)`);
+      map.set(player, existing);
+    };
+
+    const grantAwards = (
+      awards: ReturnType<typeof computeAwardsForFilter>,
+      scopeLabel: string
+    ) => {
       if (!awards) return;
-      const grant = (player: string) =>
-        map.set(player, (map.get(player) || 0) + 3);
-      grant(awards.mostFirst.player);
-      grant(awards.bestQual.player);
-      grant(awards.mostPodiums.player);
+      awards.goldWinners.forEach((w) =>
+        addEntry(w.player, `${scopeLabel} · Gold Sovereign`)
+      );
+      awards.qualWinners.forEach((w) =>
+        addEntry(w.player, `${scopeLabel} · Clutch Qualifier`)
+      );
+      awards.podiumWinners.forEach((w) =>
+        addEntry(w.player, `${scopeLabel} · Podium Regularity`)
+      );
     };
 
     if (standingsYear === 'all') {
-      grantAwards(seasonAwards);
+      grantAwards(seasonAwards, 'All-Time');
       const allYears = Array.from(
-        new Set([...bsYears, ...quizzes.map((q) => q.yearBS).filter(Boolean)])
-      );
+        new Set(
+          [...bsYears, ...quizzes.map((q) => q.yearBS)]
+            .map((y) => (y || '').trim())
+            .filter(Boolean)
+        )
+      ).sort();
       for (const yr of allYears) {
-        grantAwards(computeAwardsForFilter(yr));
+        grantAwards(computeAwardsForFilter(yr), `${yr} B.S.`);
       }
     } else {
-      grantAwards(seasonAwards);
+      grantAwards(seasonAwards, `${standingsYear.trim()} B.S.`);
     }
 
     return map;
   }, [quizzes, bsYears, standingsYear, seasonAwards]);
 
+  const awardBonusMap = useMemo(() => {
+    const map = new Map<string, number>();
+    awardDetailsMap.forEach((v, k) => map.set(k, v.total));
+    return map;
+  }, [awardDetailsMap]);
+
   const standings = useMemo(() => {
-    const base = computeStandings(quizzes, standingsYear, standingsSort);
+    const normalizedFilter = standingsYear.trim();
+    const scopedQuizzes =
+      normalizedFilter === 'all'
+        ? quizzes
+        : quizzes.filter((q) => (q.yearBS || '').trim() === normalizedFilter);
+
+    const base = computeStandings(scopedQuizzes, 'all', standingsSort);
     if (awardBonusMap.size === 0) return base;
 
     const withBonus = base.map((row) => ({
@@ -297,6 +387,118 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     quizzes.forEach((q) => q.players.forEach((p) => set.add(p.trim())));
     return Array.from(set).filter(Boolean).sort();
   }, [quizzes]);
+
+  useEffect(() => {
+    if (uniquePlayers.length >= 2) {
+      if (!h2hPlayerA || !uniquePlayers.includes(h2hPlayerA)) {
+        setH2hPlayerA(uniquePlayers[0]);
+      }
+      if (
+        !h2hPlayerB ||
+        !uniquePlayers.includes(h2hPlayerB) ||
+        h2hPlayerB === h2hPlayerA
+      ) {
+        const second =
+          uniquePlayers.find((p) => p !== (h2hPlayerA || uniquePlayers[0])) ||
+          uniquePlayers[1];
+        setH2hPlayerB(second);
+      }
+    } else if (uniquePlayers.length === 1) {
+      setH2hPlayerA(uniquePlayers[0]);
+      setH2hPlayerB(uniquePlayers[0]);
+    }
+  }, [uniquePlayers, h2hPlayerA, h2hPlayerB]);
+
+  const h2hData = useMemo(() => {
+    if (!h2hPlayerA || !h2hPlayerB) return null;
+    const normalizedFilter = h2hYear.trim();
+    const scoped =
+      normalizedFilter === 'all'
+        ? quizzes
+        : quizzes.filter((q) => (q.yearBS || '').trim() === normalizedFilter);
+
+    const summarize = (playerName: string) => {
+      const target = playerName.trim().toLowerCase();
+      let first = 0;
+      let second = 0;
+      let third = 0;
+      let top46 = 0;
+      let qualified = 0;
+      let notQualified = 0;
+      let totalQuizzes = 0;
+      let ratingSum = 0;
+      const list: QuizRecord[] = [];
+
+      for (const q of scoped) {
+        const played = q.players.some((p) => p.trim().toLowerCase() === target);
+        if (!played) continue;
+        totalQuizzes += 1;
+        ratingSum += q.rating || 0;
+        list.push(q);
+        if (q.position === 'Not Qualified') {
+          notQualified += 1;
+        } else {
+          qualified += 1;
+          if (q.position === '1st') first += 1;
+          else if (q.position === '2nd') second += 1;
+          else if (q.position === '3rd') third += 1;
+          else top46 += 1;
+        }
+      }
+
+      const podiums = first + second + third;
+      const qualRate =
+        totalQuizzes > 0 ? Math.round((qualified / totalQuizzes) * 100) : 0;
+      const podiumRate =
+        totalQuizzes > 0 ? Math.round((podiums / totalQuizzes) * 100) : 0;
+      const avgRating =
+        totalQuizzes > 0 ? Number((ratingSum / totalQuizzes).toFixed(1)) : 0;
+
+      return {
+        name: playerName,
+        first,
+        second,
+        third,
+        top46,
+        podiums,
+        qualified,
+        notQualified,
+        totalQuizzes,
+        qualRate,
+        podiumRate,
+        avgRating,
+        quizzes: list,
+      };
+    };
+
+    const a = summarize(h2hPlayerA);
+    const b = summarize(h2hPlayerB);
+
+    const targetA = h2hPlayerA.trim().toLowerCase();
+    const targetB = h2hPlayerB.trim().toLowerCase();
+    const sharedQuizzes =
+      targetA === targetB
+        ? []
+        : scoped.filter((q) => {
+            const lower = q.players.map((p) => p.trim().toLowerCase());
+            return lower.includes(targetA) && lower.includes(targetB);
+          });
+
+    const sharedWins = sharedQuizzes.filter((q) => q.position === '1st').length;
+    const sharedPodiums = sharedQuizzes.filter(
+      (q) => q.position === '1st' || q.position === '2nd' || q.position === '3rd'
+    ).length;
+    const sharedQualRate =
+      sharedQuizzes.length > 0
+        ? Math.round(
+            (sharedQuizzes.filter((q) => q.position !== 'Not Qualified').length /
+              sharedQuizzes.length) *
+              100
+          )
+        : 0;
+
+    return { a, b, sharedQuizzes, sharedWins, sharedPodiums, sharedQualRate };
+  }, [quizzes, h2hYear, h2hPlayerA, h2hPlayerB]);
 
   const hasAnyFilter = Boolean(
     filterYear || filterPosition || filterHost || filterPlayer
@@ -468,6 +670,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                   { id: 'standings', label: 'Standings' },
                   { id: 'external-wins', label: 'External Wins' },
                   { id: 'synergy', label: 'Squad Synergy' },
+                  { id: 'head-to-head', label: 'Head-to-Head' },
                 ] as const
               ).map((tab) => {
                 const active = subTab === tab.id;
@@ -657,99 +860,153 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
               </div>
 
               {/* SEASON AWARDS & TITLES (+3 pts each) */}
+              {/* SEASON AWARDS & TITLES (+3 pts each) */}
               {seasonAwards && (
-                <div className="mt-7 grid gap-4 md:grid-cols-3">
-                  <motion.div
-                    initial={{ opacity: 0, y: 14 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, amount: 0.2 }}
-                    whileHover={{ y: -3 }}
-                    transition={{ duration: 0.35 }}
-                    className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-4 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
-                        Gold Sovereign · {standingsYear === 'all' ? 'All-Time' : `${standingsYear} B.S.`}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[10px] font-bold text-[#fde68a]">
-                          +3 pts
+                <div className="mt-7 space-y-3">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <motion.div
+                      initial={{ opacity: 0, y: 14 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true, amount: 0.2 }}
+                      whileHover={{ y: -3 }}
+                      transition={{ duration: 0.35 }}
+                      className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-4 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
+                          Gold Sovereign · {standingsYear === 'all' ? 'All-Time' : `${standingsYear} B.S.`}
                         </span>
-                        <Crown className="h-4 w-4 text-[#f5dc82]" />
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] font-bold text-[#fde68a]">
+                            {seasonAwards.goldWinners.length > 0 ? '+3 pts' : '0 pts'}
+                          </span>
+                          <Crown className="h-4 w-4 text-[#f5dc82]" />
+                        </div>
                       </div>
-                    </div>
-                    <p className="mt-2 truncate font-display text-lg font-bold text-[#f8e6a0]">
-                      {seasonAwards.mostFirst.player}
-                    </p>
-                    <p className="mt-0.5 font-mono text-xs text-neutral-300">
-                      {seasonAwards.mostFirst.first} × 1st Place · +3 Bonus Pts
-                    </p>
-                  </motion.div>
+                      <p className="mt-2 truncate font-display text-lg font-bold text-[#f8e6a0]">
+                        {seasonAwards.goldWinners.length > 0
+                          ? seasonAwards.goldWinners.map((w) => w.player).join(', ')
+                          : 'No 1st Place Yet'}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-neutral-300">
+                        {seasonAwards.mostFirst
+                          ? `${seasonAwards.mostFirst.first} × 1st Place · +3 Bonus Pts${seasonAwards.goldWinners.length > 1 ? ' each' : ''}`
+                          : 'Requires at least one 1st place win'}
+                      </p>
+                    </motion.div>
 
-                  <motion.div
-                    initial={{ opacity: 0, y: 14 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, amount: 0.2 }}
-                    whileHover={{ y: -3 }}
-                    transition={{ duration: 0.35, delay: 0.06 }}
-                    className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
-                        Clutch Qualifier
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[10px] font-bold text-emerald-200">
-                          +3 pts
+                    <motion.div
+                      initial={{ opacity: 0, y: 14 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true, amount: 0.2 }}
+                      whileHover={{ y: -3 }}
+                      transition={{ duration: 0.35, delay: 0.06 }}
+                      className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
+                          Clutch Qualifier
                         </span>
-                        <Award className="h-4 w-4 text-emerald-300" />
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] font-bold text-emerald-200">
+                            {seasonAwards.qualWinners.length > 0 ? '+3 pts' : '0 pts'}
+                          </span>
+                          <Award className="h-4 w-4 text-emerald-300" />
+                        </div>
                       </div>
-                    </div>
-                    <p className="mt-2 truncate font-display text-lg font-bold text-white">
-                      {seasonAwards.bestQual.player}
-                    </p>
-                    <p className="mt-0.5 font-mono text-xs text-emerald-200/90">
-                      {seasonAwards.bestQual.totalQuizzes > 0
-                        ? `${Math.round(
-                            (seasonAwards.bestQual.qualified /
-                              seasonAwards.bestQual.totalQuizzes) *
-                              100
-                          )}% Qual (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes}) · +3 Bonus`
-                        : '—'}
-                    </p>
-                  </motion.div>
+                      <p className="mt-2 truncate font-display text-lg font-bold text-white">
+                        {seasonAwards.qualWinners.length > 0
+                          ? seasonAwards.qualWinners.map((w) => w.player).join(', ')
+                          : 'No Qualifiers Yet'}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-emerald-200/90">
+                        {seasonAwards.bestQual && seasonAwards.bestQual.totalQuizzes > 0
+                          ? `${Math.round(
+                              (seasonAwards.bestQual.qualified /
+                                seasonAwards.bestQual.totalQuizzes) *
+                                100
+                            )}% Qual (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes}) · +3 Bonus${seasonAwards.qualWinners.length > 1 ? ' each' : ''}`
+                          : 'Requires at least one qualified quiz'}
+                      </p>
+                    </motion.div>
 
-                  <motion.div
-                    initial={{ opacity: 0, y: 14 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, amount: 0.2 }}
-                    whileHover={{ y: -3 }}
-                    transition={{ duration: 0.35, delay: 0.12 }}
-                    className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-4 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
-                        Podium Regularity
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[10px] font-bold text-slate-200">
-                          +3 pts
+                    <motion.div
+                      initial={{ opacity: 0, y: 14 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true, amount: 0.2 }}
+                      whileHover={{ y: -3 }}
+                      transition={{ duration: 0.35, delay: 0.12 }}
+                      className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-4 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
+                          Podium Regularity
                         </span>
-                        <Sparkles className="h-4 w-4 text-slate-200" />
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] font-bold text-slate-200">
+                            {seasonAwards.podiumWinners.length > 0 ? '+3 pts' : '0 pts'}
+                          </span>
+                          <Sparkles className="h-4 w-4 text-slate-200" />
+                        </div>
                       </div>
+                      <p className="mt-2 truncate font-display text-lg font-bold text-slate-100">
+                        {seasonAwards.podiumWinners.length > 0
+                          ? seasonAwards.podiumWinners.map((w) => w.player).join(', ')
+                          : 'No Podiums Yet'}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-slate-300">
+                        {seasonAwards.mostPodiums
+                          ? `${
+                              seasonAwards.mostPodiums.first +
+                              seasonAwards.mostPodiums.second +
+                              seasonAwards.mostPodiums.third
+                            } Top-3 (${seasonAwards.mostPodiums.first}G · ${seasonAwards.mostPodiums.second}S · ${seasonAwards.mostPodiums.third}B) · +3 Bonus${seasonAwards.podiumWinners.length > 1 ? ' each' : ''}`
+                          : 'Requires at least one top-3 finish'}
+                      </p>
+                    </motion.div>
+                  </div>
+
+                  {awardDetailsMap.size > 0 && (
+                    <div className="rounded-xl border border-[#d4af37]/20 bg-[#12100b] px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowBonusLedger((v) => !v)}
+                        className="flex w-full items-center justify-between text-left font-mono text-[11px] font-semibold text-[#f5dc82] cursor-pointer"
+                      >
+                        <span>
+                          {showBonusLedger
+                            ? 'Hide Honor Bonus Breakdown'
+                            : `View Honor Bonus Breakdown (${awardDetailsMap.size} ${awardDetailsMap.size === 1 ? 'player' : 'players'} awarded +3 pts/honor)`}
+                        </span>
+                        <span>{showBonusLedger ? '▲' : '▼'}</span>
+                      </button>
+
+                      {showBonusLedger && (
+                        <div className="mt-3 grid gap-2 border-t border-white/10 pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {Array.from(awardDetailsMap.entries())
+                            .sort((a, b) => b[1].total - a[1].total)
+                            .map(([player, info]) => (
+                              <div
+                                key={player}
+                                className="rounded-lg border border-white/10 bg-black/35 p-2.5 text-xs"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="truncate font-semibold text-white">
+                                    {player}
+                                  </span>
+                                  <span className="font-mono font-bold text-emerald-300">
+                                    +{info.total} pts
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-[11px] leading-relaxed text-neutral-400">
+                                  {info.items.join(' · ')}
+                                </p>
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    <p className="mt-2 truncate font-display text-lg font-bold text-slate-100">
-                      {seasonAwards.mostPodiums.player}
-                    </p>
-                    <p className="mt-0.5 font-mono text-xs text-slate-300">
-                      {seasonAwards.mostPodiums.first +
-                        seasonAwards.mostPodiums.second +
-                        seasonAwards.mostPodiums.third}{' '}
-                      Top-3 ({seasonAwards.mostPodiums.first}G ·{' '}
-                      {seasonAwards.mostPodiums.second}S ·{' '}
-                      {seasonAwards.mostPodiums.third}B) · +3 Bonus
-                    </p>
-                  </motion.div>
+                  )}
                 </div>
               )}
 
@@ -985,12 +1242,14 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                             </td>
                             <td className="py-4 pr-5 text-right font-mono text-base font-bold text-[#f0cb65]">
                               <span>{row.points}</span>
-                              {(awardBonusMap.get(row.player) || 0) > 0 && (
+                              {(awardDetailsMap.get(row.player)?.total || 0) > 0 && (
                                 <span
-                                  title={`Includes +${awardBonusMap.get(row.player)} Season Honors bonus`}
+                                  title={awardDetailsMap
+                                    .get(row.player)
+                                    ?.items.join('\n')}
                                   className="ml-1 text-[10px] font-semibold text-emerald-300"
                                 >
-                                  (+{awardBonusMap.get(row.player)})
+                                  (+{awardDetailsMap.get(row.player)?.total})
                                 </span>
                               )}
                             </td>
@@ -1036,9 +1295,14 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           </div>
                           <span className="shrink-0 font-mono text-sm font-bold text-[#f0cb65]">
                             {row.points} pts
-                            {(awardBonusMap.get(row.player) || 0) > 0 && (
-                              <span className="ml-1 text-[10px] font-semibold text-emerald-300">
-                                (+{awardBonusMap.get(row.player)})
+                            {(awardDetailsMap.get(row.player)?.total || 0) > 0 && (
+                              <span
+                                title={awardDetailsMap
+                                  .get(row.player)
+                                  ?.items.join('\n')}
+                                className="ml-1 text-[10px] font-semibold text-emerald-300"
+                              >
+                                (+{awardDetailsMap.get(row.player)?.total})
                               </span>
                             )}
                           </span>
@@ -1662,6 +1926,398 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     ))}
                   </div>
                 </>
+              )}
+            </motion.div>
+          )}
+
+          {/* ================= 5. HEAD-TO-HEAD COMPARE SUB-TAB (EXCLUDES STANDINGS POINTS) ================= */}
+          {subTab === 'head-to-head' && (
+            <motion.div
+              key="head-to-head"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="rounded-3xl border border-[#d4af37]/40 bg-[#08080a] p-6 text-[#f5f2eb] shadow-[0_24px_80px_rgba(0,0,0,0.65)] sm:p-10"
+            >
+              {/* Header & Player Selectors */}
+              <div className="flex flex-col justify-between gap-5 border-b border-[#d4af37]/20 pb-7 lg:flex-row lg:items-end">
+                <div>
+                  <p className="font-mono text-xs tracking-[0.2em] text-[#d4af37] uppercase">
+                    Direct Comparison · External Wins Only
+                  </p>
+                  <h2 className="mt-1.5 font-display text-2xl font-bold text-[#f8e6a0] sm:text-3xl">
+                    Head-to-Head Compare
+                  </h2>
+                  <p className="mt-1.5 text-xs text-neutral-400">
+                    Compare placements, qualification consistency, quiz ratings,
+                    and shared team chemistry side by side.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <select
+                    aria-label="Filter Head-to-Head by B.S. year"
+                    value={h2hYear}
+                    onChange={(e) => setH2hYear(e.target.value)}
+                    className="rounded-xl border border-[#d4af37]/40 bg-[#12110d] px-3.5 py-2.5 font-mono text-xs font-semibold text-[#f8e6a0] focus:border-[#f0cb65] focus:outline-none cursor-pointer"
+                  >
+                    <option value="all">All B.S. Years</option>
+                    {bsYears.map((yr) => (
+                      <option key={yr} value={yr}>
+                        {yr} B.S.
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {uniquePlayers.length === 0 || !h2hData ? (
+                <div className="mt-8 rounded-2xl border border-[#d4af37]/20 bg-[#11100d] p-12 text-center">
+                  <Swords className="mx-auto h-9 w-9 text-[#d4af37]/60" />
+                  <p className="mt-3 text-sm text-neutral-300">
+                    Add quizzes with participating players to unlock Head-to-Head
+                    comparisons.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-7 space-y-7">
+                  {/* Player Picker Duel Bar */}
+                  <div className="grid items-center gap-4 rounded-2xl border border-white/10 bg-[#11100c] p-5 md:grid-cols-11">
+                    <div className="md:col-span-5">
+                      <label className="mb-1.5 block font-mono text-[10px] font-bold tracking-wider text-[#f5dc82] uppercase">
+                        Challenger A
+                      </label>
+                      <select
+                        aria-label="Select Player A"
+                        value={h2hPlayerA}
+                        onChange={(e) => setH2hPlayerA(e.target.value)}
+                        className="w-full rounded-xl border border-[#d4af37]/45 bg-[#19160e] px-3.5 py-2.5 text-sm font-bold text-[#f8e6a0] focus:border-[#f0cb65] focus:outline-none cursor-pointer"
+                      >
+                        {uniquePlayers.map((pl) => (
+                          <option key={pl} value={pl}>
+                            {pl}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex justify-center md:col-span-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setH2hPlayerA(h2hPlayerB);
+                          setH2hPlayerB(h2hPlayerA);
+                        }}
+                        title="Swap Players"
+                        aria-label="Swap Player A and Player B"
+                        className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#d4af37]/40 bg-[#17140d] text-[#f5dc82] transition-transform hover:scale-105 hover:bg-[#d4af37]/20 cursor-pointer"
+                      >
+                        <ArrowLeftRight className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="md:col-span-5">
+                      <label className="mb-1.5 block font-mono text-[10px] font-bold tracking-wider text-sky-300 uppercase">
+                        Challenger B
+                      </label>
+                      <select
+                        aria-label="Select Player B"
+                        value={h2hPlayerB}
+                        onChange={(e) => setH2hPlayerB(e.target.value)}
+                        className="w-full rounded-xl border border-sky-400/40 bg-[#0d1624] px-3.5 py-2.5 text-sm font-bold text-sky-200 focus:border-sky-300 focus:outline-none cursor-pointer"
+                      >
+                        {uniquePlayers.map((pl) => (
+                          <option key={pl} value={pl}>
+                            {pl}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Summary Duel Cards (No Standings Points) */}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <motion.div
+                      key={`card-a-${h2hData.a.name}-${h2hYear}`}
+                      initial={{ opacity: 0, x: -12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="rounded-2xl border border-[#d4af37]/45 bg-gradient-to-br from-[#1b160a] to-[#0c0b08] p-5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
+                          Corner A
+                        </span>
+                        <span className="font-mono text-xs font-bold text-[#f5dc82]">
+                          {h2hData.a.qualRate}% Qualified
+                        </span>
+                      </div>
+                      <h3 className="mt-1.5 font-display text-2xl font-bold text-[#f8e6a0]">
+                        {h2hData.a.name}
+                      </h3>
+                      <div className="mt-4 grid grid-cols-3 gap-2.5 text-center font-mono text-xs">
+                        <div className="rounded-xl border border-[#d4af37]/25 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Quizzes
+                          </span>
+                          <span className="text-base font-bold text-white">
+                            {h2hData.a.totalQuizzes}
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-[#d4af37]/25 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Podiums
+                          </span>
+                          <span className="text-base font-bold text-[#f8e6a0]">
+                            {h2hData.a.podiums}
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-[#d4af37]/25 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Avg Rating
+                          </span>
+                          <span className="text-base font-bold text-emerald-300">
+                            {h2hData.a.avgRating}/10
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+
+                    <motion.div
+                      key={`card-b-${h2hData.b.name}-${h2hYear}`}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="rounded-2xl border border-sky-400/40 bg-gradient-to-br from-[#0c192b] to-[#080d14] p-5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] font-bold tracking-widest text-sky-300 uppercase">
+                          Corner B
+                        </span>
+                        <span className="font-mono text-xs font-bold text-sky-200">
+                          {h2hData.b.qualRate}% Qualified
+                        </span>
+                      </div>
+                      <h3 className="mt-1.5 font-display text-2xl font-bold text-white">
+                        {h2hData.b.name}
+                      </h3>
+                      <div className="mt-4 grid grid-cols-3 gap-2.5 text-center font-mono text-xs">
+                        <div className="rounded-xl border border-sky-400/20 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Quizzes
+                          </span>
+                          <span className="text-base font-bold text-white">
+                            {h2hData.b.totalQuizzes}
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-sky-400/20 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Podiums
+                          </span>
+                          <span className="text-base font-bold text-sky-200">
+                            {h2hData.b.podiums}
+                          </span>
+                        </div>
+                        <div className="rounded-xl border border-sky-400/20 bg-black/35 py-2.5">
+                          <span className="block text-[10px] text-neutral-400">
+                            Avg Rating
+                          </span>
+                          <span className="text-base font-bold text-emerald-300">
+                            {h2hData.b.avgRating}/10
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </div>
+
+                  {/* Animated Metric-by-Metric Comparison Bars (No Standings Points) */}
+                  <div className="space-y-4 rounded-2xl border border-[#d4af37]/25 bg-[#0d0c09] p-5 sm:p-6">
+                    <h4 className="font-mono text-xs font-bold tracking-wider text-[#d4af37] uppercase">
+                      Stat-by-Stat Comparison
+                    </h4>
+                    {[
+                      {
+                        label: '1st Place Wins (Gold)',
+                        valA: h2hData.a.first,
+                        valB: h2hData.b.first,
+                        suffix: '',
+                      },
+                      {
+                        label: '2nd Place Finishes (Silver)',
+                        valA: h2hData.a.second,
+                        valB: h2hData.b.second,
+                        suffix: '',
+                      },
+                      {
+                        label: '3rd Place Finishes (Bronze)',
+                        valA: h2hData.a.third,
+                        valB: h2hData.b.third,
+                        suffix: '',
+                      },
+                      {
+                        label: '4th – 6th Placements',
+                        valA: h2hData.a.top46,
+                        valB: h2hData.b.top46,
+                        suffix: '',
+                      },
+                      {
+                        label: 'Total Top-3 Podiums',
+                        valA: h2hData.a.podiums,
+                        valB: h2hData.b.podiums,
+                        suffix: '',
+                      },
+                      {
+                        label: 'Total Quizzes Played',
+                        valA: h2hData.a.totalQuizzes,
+                        valB: h2hData.b.totalQuizzes,
+                        suffix: '',
+                      },
+                      {
+                        label: 'Qualification Rate',
+                        valA: h2hData.a.qualRate,
+                        valB: h2hData.b.qualRate,
+                        suffix: '%',
+                      },
+                      {
+                        label: 'Podium Rate',
+                        valA: h2hData.a.podiumRate,
+                        valB: h2hData.b.podiumRate,
+                        suffix: '%',
+                      },
+                      {
+                        label: 'Average Quiz Rating',
+                        valA: h2hData.a.avgRating,
+                        valB: h2hData.b.avgRating,
+                        suffix: '/10',
+                      },
+                    ].map((metric, mIdx) => {
+                      const total = metric.valA + metric.valB;
+                      const pctA =
+                        total > 0 ? Math.round((metric.valA / total) * 100) : 50;
+                      const pctB = 100 - pctA;
+                      const lead =
+                        metric.valA > metric.valB
+                          ? 'A'
+                          : metric.valB > metric.valA
+                            ? 'B'
+                            : 'TIE';
+                      return (
+                        <div key={metric.label} className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span
+                              className={`font-mono font-bold tabular-nums ${
+                                lead === 'A'
+                                  ? 'text-[#f8e6a0]'
+                                  : 'text-neutral-300'
+                              }`}
+                            >
+                              {metric.valA}
+                              {metric.suffix}
+                            </span>
+                            <span className="font-mono text-[11px] uppercase tracking-wider text-neutral-400">
+                              {metric.label}
+                            </span>
+                            <span
+                              className={`font-mono font-bold tabular-nums ${
+                                lead === 'B'
+                                  ? 'text-sky-300'
+                                  : 'text-neutral-300'
+                              }`}
+                            >
+                              {metric.valB}
+                              {metric.suffix}
+                            </span>
+                          </div>
+                          <div className="flex h-2.5 overflow-hidden rounded-full bg-white/10">
+                            <motion.div
+                              initial={{ width: '50%' }}
+                              animate={{ width: `${pctA}%` }}
+                              transition={{
+                                duration: 0.45,
+                                delay: mIdx * 0.03,
+                                ease: [0.16, 1, 0.3, 1],
+                              }}
+                              className="bg-gradient-to-r from-[#b8861b] to-[#f0cb65]"
+                            />
+                            <motion.div
+                              initial={{ width: '50%' }}
+                              animate={{ width: `${pctB}%` }}
+                              transition={{
+                                duration: 0.45,
+                                delay: mIdx * 0.03,
+                                ease: [0.16, 1, 0.3, 1],
+                              }}
+                              className="bg-gradient-to-r from-sky-500 to-cyan-300"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Shared Quizzes Together */}
+                  <div className="rounded-2xl border border-emerald-400/25 bg-[#0a1310] p-5 sm:p-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+                      <div>
+                        <p className="font-mono text-[11px] font-bold tracking-wider text-emerald-300 uppercase">
+                          Shared Teammate Record
+                        </p>
+                        <h4 className="mt-1 font-display text-lg font-bold text-white">
+                          {h2hPlayerA === h2hPlayerB
+                            ? 'Select two different players to view shared quizzes'
+                            : `${h2hData.a.name} & ${h2hData.b.name} Together`}
+                        </h4>
+                      </div>
+                      {h2hPlayerA !== h2hPlayerB && (
+                        <div className="flex flex-wrap gap-3 font-mono text-xs">
+                          <span className="rounded-lg border border-white/10 bg-black/35 px-3 py-1.5 text-neutral-200">
+                            {h2hData.sharedQuizzes.length} Shared Quizzes
+                          </span>
+                          <span className="rounded-lg border border-[#d4af37]/30 bg-black/35 px-3 py-1.5 text-[#f8e6a0]">
+                            {h2hData.sharedWins} Gold Wins
+                          </span>
+                          <span className="rounded-lg border border-emerald-400/30 bg-black/35 px-3 py-1.5 text-emerald-200">
+                            {h2hData.sharedPodiums} Podiums ({h2hData.sharedQualRate}% Qual)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {h2hPlayerA !== h2hPlayerB && (
+                      <div className="mt-4">
+                        {h2hData.sharedQuizzes.length === 0 ? (
+                          <p className="text-xs text-neutral-400">
+                            These two players have not competed on the same team
+                            in {h2hYear === 'all' ? 'any recorded quiz' : `${h2hYear} B.S.`}.
+                          </p>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            {h2hData.sharedQuizzes.map((sq) => (
+                              <button
+                                key={sq.id}
+                                type="button"
+                                onClick={() => setSelectedQuiz(sq)}
+                                className="rounded-xl border border-white/10 bg-[#101c17] p-3.5 text-left transition-colors hover:border-emerald-400/45 cursor-pointer"
+                              >
+                                <p className="font-mono text-[11px] font-bold text-[#f5dc82]">
+                                  {sq.yearBS} B.S. ·{' '}
+                                  {sq.position === 'Not Qualified'
+                                    ? 'Not Qualified'
+                                    : `${sq.position} Place`}
+                                </p>
+                                <p className="mt-1 line-clamp-1 font-display text-sm font-bold text-white">
+                                  {sq.quizName}
+                                </p>
+                                <p className="mt-1 truncate text-[11px] text-neutral-400">
+                                  {sq.host}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
             </motion.div>
           )}
