@@ -60,7 +60,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
   const [standingsYear, setStandingsYear] = useState<string>('all');
   const [standingsSort, setStandingsSort] =
     useState<StandingsSortMode>('points');
-  const [showBonusLedger, setShowBonusLedger] = useState(false);
 
   // External Wins filters
   const [filterYear, setFilterYear] = useState<string>('');
@@ -132,30 +131,16 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
         )
       : [];
 
-    // 2. Clutch Qualifier (must have >= 1 qualified)
-    const qualPool = base.some((r) => r.totalQuizzes >= 2)
-      ? base.filter((r) => r.totalQuizzes >= 2 && r.qualified > 0)
-      : base.filter((r) => r.qualified > 0);
-    const qualSorted = [...qualPool].sort((a, b) => {
-      const rateA = a.totalQuizzes > 0 ? a.qualified / a.totalQuizzes : 0;
-      const rateB = b.totalQuizzes > 0 ? b.qualified / b.totalQuizzes : 0;
-      if (rateB !== rateA) return rateB - rateA;
-      return b.qualified - a.qualified || b.points - a.points;
-    });
+    // 2. Clutch Qualifier (most qualifications, must have >= 1 qualified)
+    const qualPool = base.filter((r) => r.qualified > 0);
+    const qualSorted = [...qualPool].sort(
+      (a, b) => b.qualified - a.qualified || b.points - a.points
+    );
     const topQual = qualSorted[0] || null;
-    const topQualRate =
-      topQual && topQual.totalQuizzes > 0
-        ? topQual.qualified / topQual.totalQuizzes
-        : 0;
     const qualWinners = topQual
-      ? qualSorted.filter((r) => {
-          const rate = r.totalQuizzes > 0 ? r.qualified / r.totalQuizzes : 0;
-          return (
-            rate === topQualRate &&
-            r.qualified === topQual.qualified &&
-            r.points === topQual.points
-          );
-        })
+      ? qualSorted.filter(
+          (r) => r.qualified === topQual.qualified && r.points === topQual.points
+        )
       : [];
 
     // 3. Podium Regularity (must have >= 1 top-3 podium)
@@ -195,33 +180,22 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     [quizzes, standingsYear]
   );
 
-  const awardDetailsMap = useMemo(() => {
-    const map = new Map<string, { total: number; items: string[] }>();
-    const addEntry = (player: string, label: string) => {
-      const existing = map.get(player) || { total: 0, items: [] };
-      existing.total += 3;
-      existing.items.push(`${label} (+3)`);
-      map.set(player, existing);
-    };
+  const awardBonusMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const grant = (player: string) =>
+      map.set(player, (map.get(player) || 0) + 3);
 
     const grantAwards = (
-      awards: ReturnType<typeof computeAwardsForFilter>,
-      scopeLabel: string
+      awards: ReturnType<typeof computeAwardsForFilter>
     ) => {
       if (!awards) return;
-      awards.goldWinners.forEach((w) =>
-        addEntry(w.player, `${scopeLabel} · Gold Sovereign`)
-      );
-      awards.qualWinners.forEach((w) =>
-        addEntry(w.player, `${scopeLabel} · Clutch Qualifier`)
-      );
-      awards.podiumWinners.forEach((w) =>
-        addEntry(w.player, `${scopeLabel} · Podium Regularity`)
-      );
+      awards.goldWinners.forEach((w) => grant(w.player));
+      awards.qualWinners.forEach((w) => grant(w.player));
+      awards.podiumWinners.forEach((w) => grant(w.player));
     };
 
     if (standingsYear === 'all') {
-      grantAwards(seasonAwards, 'All-Time');
+      grantAwards(seasonAwards);
       const allYears = Array.from(
         new Set(
           [...bsYears, ...quizzes.map((q) => q.yearBS)]
@@ -230,20 +204,14 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
         )
       ).sort();
       for (const yr of allYears) {
-        grantAwards(computeAwardsForFilter(yr), `${yr} B.S.`);
+        grantAwards(computeAwardsForFilter(yr));
       }
     } else {
-      grantAwards(seasonAwards, `${standingsYear.trim()} B.S.`);
+      grantAwards(seasonAwards);
     }
 
     return map;
   }, [quizzes, bsYears, standingsYear, seasonAwards]);
-
-  const awardBonusMap = useMemo(() => {
-    const map = new Map<string, number>();
-    awardDetailsMap.forEach((v, k) => map.set(k, v.total));
-    return map;
-  }, [awardDetailsMap]);
 
   const standings = useMemo(() => {
     const normalizedFilter = standingsYear.trim();
@@ -817,7 +785,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                   <p className="mt-1.5 text-xs text-neutral-400">
                     Ranked by Points, then oldest 1st quiz played, then D-first
                     alphabetical order · 1st (6) · 2nd (5) · 3rd (4) · 4th (3) ·
-                    5th (2) · 6th (1) · NQ (0) · +3 pts per Season &amp; All-Time Honor
+                    5th (2) · 6th (1) · NQ (0)
                   </p>
                 </div>
 
@@ -859,154 +827,104 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                 </div>
               </div>
 
-              {/* SEASON AWARDS & TITLES (+3 pts each) */}
-              {/* SEASON AWARDS & TITLES (+3 pts each) */}
+              {/* SEASON AWARDS & TITLES */}
               {seasonAwards && (
-                <div className="mt-7 space-y-3">
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <motion.div
-                      initial={{ opacity: 0, y: 14 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, amount: 0.2 }}
-                      whileHover={{ y: -3 }}
-                      transition={{ duration: 0.35 }}
-                      className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-4 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
-                          Gold Sovereign · {standingsYear === 'all' ? 'All-Time' : `${standingsYear} B.S.`}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-[10px] font-bold text-[#fde68a]">
-                            {seasonAwards.goldWinners.length > 0 ? '+3 pts' : '0 pts'}
-                          </span>
-                          <Crown className="h-4 w-4 text-[#f5dc82]" />
-                        </div>
-                      </div>
-                      <p className="mt-2 truncate font-display text-lg font-bold text-[#f8e6a0]">
-                        {seasonAwards.goldWinners.length > 0
-                          ? seasonAwards.goldWinners.map((w) => w.player).join(', ')
-                          : 'No 1st Place Yet'}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-neutral-300">
-                        {seasonAwards.mostFirst
-                          ? `${seasonAwards.mostFirst.first} × 1st Place · +3 Bonus Pts${seasonAwards.goldWinners.length > 1 ? ' each' : ''}`
-                          : 'Requires at least one 1st place win'}
-                      </p>
-                    </motion.div>
-
-                    <motion.div
-                      initial={{ opacity: 0, y: 14 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, amount: 0.2 }}
-                      whileHover={{ y: -3 }}
-                      transition={{ duration: 0.35, delay: 0.06 }}
-                      className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
-                          Clutch Qualifier
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-[10px] font-bold text-emerald-200">
-                            {seasonAwards.qualWinners.length > 0 ? '+3 pts' : '0 pts'}
-                          </span>
-                          <Award className="h-4 w-4 text-emerald-300" />
-                        </div>
-                      </div>
-                      <p className="mt-2 truncate font-display text-lg font-bold text-white">
-                        {seasonAwards.qualWinners.length > 0
-                          ? seasonAwards.qualWinners.map((w) => w.player).join(', ')
-                          : 'No Qualifiers Yet'}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-emerald-200/90">
-                        {seasonAwards.bestQual && seasonAwards.bestQual.totalQuizzes > 0
-                          ? `${Math.round(
-                              (seasonAwards.bestQual.qualified /
-                                seasonAwards.bestQual.totalQuizzes) *
-                                100
-                            )}% Qual (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes}) · +3 Bonus${seasonAwards.qualWinners.length > 1 ? ' each' : ''}`
-                          : 'Requires at least one qualified quiz'}
-                      </p>
-                    </motion.div>
-
-                    <motion.div
-                      initial={{ opacity: 0, y: 14 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, amount: 0.2 }}
-                      whileHover={{ y: -3 }}
-                      transition={{ duration: 0.35, delay: 0.12 }}
-                      className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-4 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
-                          Podium Regularity
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-[10px] font-bold text-slate-200">
-                            {seasonAwards.podiumWinners.length > 0 ? '+3 pts' : '0 pts'}
-                          </span>
-                          <Sparkles className="h-4 w-4 text-slate-200" />
-                        </div>
-                      </div>
-                      <p className="mt-2 truncate font-display text-lg font-bold text-slate-100">
-                        {seasonAwards.podiumWinners.length > 0
-                          ? seasonAwards.podiumWinners.map((w) => w.player).join(', ')
-                          : 'No Podiums Yet'}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-slate-300">
-                        {seasonAwards.mostPodiums
-                          ? `${
-                              seasonAwards.mostPodiums.first +
-                              seasonAwards.mostPodiums.second +
-                              seasonAwards.mostPodiums.third
-                            } Top-3 (${seasonAwards.mostPodiums.first}G · ${seasonAwards.mostPodiums.second}S · ${seasonAwards.mostPodiums.third}B) · +3 Bonus${seasonAwards.podiumWinners.length > 1 ? ' each' : ''}`
-                          : 'Requires at least one top-3 finish'}
-                      </p>
-                    </motion.div>
-                  </div>
-
-                  {awardDetailsMap.size > 0 && (
-                    <div className="rounded-xl border border-[#d4af37]/20 bg-[#12100b] px-4 py-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setShowBonusLedger((v) => !v)}
-                        className="flex w-full items-center justify-between text-left font-mono text-[11px] font-semibold text-[#f5dc82] cursor-pointer"
-                      >
-                        <span>
-                          {showBonusLedger
-                            ? 'Hide Honor Bonus Breakdown'
-                            : `View Honor Bonus Breakdown (${awardDetailsMap.size} ${awardDetailsMap.size === 1 ? 'player' : 'players'} awarded +3 pts/honor)`}
-                        </span>
-                        <span>{showBonusLedger ? '▲' : '▼'}</span>
-                      </button>
-
-                      {showBonusLedger && (
-                        <div className="mt-3 grid gap-2 border-t border-white/10 pt-3 sm:grid-cols-2 lg:grid-cols-3">
-                          {Array.from(awardDetailsMap.entries())
-                            .sort((a, b) => b[1].total - a[1].total)
-                            .map(([player, info]) => (
-                              <div
-                                key={player}
-                                className="rounded-lg border border-white/10 bg-black/35 p-2.5 text-xs"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="truncate font-semibold text-white">
-                                    {player}
-                                  </span>
-                                  <span className="font-mono font-bold text-emerald-300">
-                                    +{info.total} pts
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-[11px] leading-relaxed text-neutral-400">
-                                  {info.items.join(' · ')}
-                                </p>
-                              </div>
-                            ))}
-                        </div>
-                      )}
+                <div className="mt-7 grid gap-4 md:grid-cols-3">
+                  <motion.div
+                    initial={{ opacity: 0, y: 14 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    whileHover={{ y: -3 }}
+                    transition={{ duration: 0.35 }}
+                    className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-4 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
+                        Gold Sovereign ·{' '}
+                        {standingsYear === 'all'
+                          ? 'All-Time'
+                          : `${standingsYear} B.S.`}
+                      </span>
+                      <Crown className="h-4 w-4 text-[#f5dc82]" />
                     </div>
-                  )}
+                    <p className="mt-2 truncate font-display text-lg font-bold text-[#f8e6a0]">
+                      {seasonAwards.goldWinners.length > 0
+                        ? seasonAwards.goldWinners
+                            .map((w) => w.player)
+                            .join(', ')
+                        : 'No 1st Place Yet'}
+                    </p>
+                    <p className="mt-0.5 font-mono text-xs text-neutral-300">
+                      {seasonAwards.mostFirst
+                        ? `${seasonAwards.mostFirst.first} × 1st Place`
+                        : 'Requires at least one 1st place win'}
+                    </p>
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 14 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    whileHover={{ y: -3 }}
+                    transition={{ duration: 0.35, delay: 0.06 }}
+                    className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
+                        Clutch Qualifier
+                      </span>
+                      <Award className="h-4 w-4 text-emerald-300" />
+                    </div>
+                    <p className="mt-2 truncate font-display text-lg font-bold text-white">
+                      {seasonAwards.qualWinners.length > 0
+                        ? seasonAwards.qualWinners
+                            .map((w) => w.player)
+                            .join(', ')
+                        : 'No Qualifiers Yet'}
+                    </p>
+                    <p className="mt-0.5 font-mono text-xs text-emerald-200/90">
+                      {seasonAwards.bestQual &&
+                      seasonAwards.bestQual.qualified > 0
+                        ? `${seasonAwards.bestQual.qualified} ${
+                            seasonAwards.bestQual.qualified === 1
+                              ? 'Qualification'
+                              : 'Qualifications'
+                          } (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes} Quizzes)`
+                        : 'Requires at least one qualified quiz'}
+                    </p>
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 14 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    whileHover={{ y: -3 }}
+                    transition={{ duration: 0.35, delay: 0.12 }}
+                    className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-4 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
+                        Podium Regularity
+                      </span>
+                      <Sparkles className="h-4 w-4 text-slate-200" />
+                    </div>
+                    <p className="mt-2 truncate font-display text-lg font-bold text-slate-100">
+                      {seasonAwards.podiumWinners.length > 0
+                        ? seasonAwards.podiumWinners
+                            .map((w) => w.player)
+                            .join(', ')
+                        : 'No Podiums Yet'}
+                    </p>
+                    <p className="mt-0.5 font-mono text-xs text-slate-300">
+                      {seasonAwards.mostPodiums
+                        ? `${
+                            seasonAwards.mostPodiums.first +
+                            seasonAwards.mostPodiums.second +
+                            seasonAwards.mostPodiums.third
+                          } Top-3 (${seasonAwards.mostPodiums.first}G · ${seasonAwards.mostPodiums.second}S · ${seasonAwards.mostPodiums.third}B)`
+                        : 'Requires at least one top-3 finish'}
+                    </p>
+                  </motion.div>
                 </div>
               )}
 
@@ -1241,17 +1159,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                               {row.qualified}
                             </td>
                             <td className="py-4 pr-5 text-right font-mono text-base font-bold text-[#f0cb65]">
-                              <span>{row.points}</span>
-                              {(awardDetailsMap.get(row.player)?.total || 0) > 0 && (
-                                <span
-                                  title={awardDetailsMap
-                                    .get(row.player)
-                                    ?.items.join('\n')}
-                                  className="ml-1 text-[10px] font-semibold text-emerald-300"
-                                >
-                                  (+{awardDetailsMap.get(row.player)?.total})
-                                </span>
-                              )}
+                              {row.points}
                             </td>
                           </motion.tr>
                         ))}
@@ -1295,16 +1203,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           </div>
                           <span className="shrink-0 font-mono text-sm font-bold text-[#f0cb65]">
                             {row.points} pts
-                            {(awardDetailsMap.get(row.player)?.total || 0) > 0 && (
-                              <span
-                                title={awardDetailsMap
-                                  .get(row.player)
-                                  ?.items.join('\n')}
-                                className="ml-1 text-[10px] font-semibold text-emerald-300"
-                              >
-                                (+{awardDetailsMap.get(row.player)?.total})
-                              </span>
-                            )}
                           </span>
                         </div>
 
