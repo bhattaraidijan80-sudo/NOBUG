@@ -29,6 +29,7 @@ import {
   POSITION_OPTIONS,
   POSITION_POINTS,
   StandingsSortMode,
+  compareDFirst,
   computeStandings,
 } from '../data/initialData';
 import {
@@ -101,11 +102,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [lightbox, selectedQuiz]);
 
-  const standings = useMemo(
-    () => computeStandings(quizzes, standingsYear, standingsSort),
-    [quizzes, standingsYear, standingsSort]
-  );
-
   const seasonAwards = useMemo(() => {
     const base = computeStandings(quizzes, standingsYear, 'points');
     if (base.length === 0) return null;
@@ -133,6 +129,39 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
 
     return { mostFirst, bestQual, mostPodiums };
   }, [quizzes, standingsYear]);
+
+  const awardBonusMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!seasonAwards) return map;
+    const grant = (player: string) =>
+      map.set(player, (map.get(player) || 0) + 3);
+
+    grant(seasonAwards.mostFirst.player);
+    grant(seasonAwards.bestQual.player);
+    grant(seasonAwards.mostPodiums.player);
+    return map;
+  }, [seasonAwards]);
+
+  const standings = useMemo(() => {
+    const base = computeStandings(quizzes, standingsYear, standingsSort);
+    if (awardBonusMap.size === 0) return base;
+
+    const withBonus = base.map((row) => ({
+      ...row,
+      points: row.points + (awardBonusMap.get(row.player) || 0),
+    }));
+
+    if (standingsSort === 'points') {
+      withBonus.sort(
+        (a, b) =>
+          b.points - a.points ||
+          a.earliestDate - b.earliestDate ||
+          compareDFirst(a.player, b.player)
+      );
+    }
+
+    return withBonus;
+  }, [quizzes, standingsYear, standingsSort, awardBonusMap]);
 
   const synergyRows = useMemo(() => {
     const map = new Map<
@@ -608,7 +637,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                 </div>
               </div>
 
-              {/* SEASON AWARDS & TITLES */}
+              {/* SEASON AWARDS & TITLES (+3 pts each) */}
               {seasonAwards && (
                 <div className="mt-7 grid gap-4 md:grid-cols-3">
                   <motion.div
@@ -619,17 +648,22 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     transition={{ duration: 0.35 }}
                     className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-4 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
                         Gold Sovereign · {standingsYear === 'all' ? 'All-Time' : `${standingsYear} B.S.`}
                       </span>
-                      <Crown className="h-4 w-4 text-[#f5dc82]" />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[10px] font-bold text-[#fde68a]">
+                          +3 pts
+                        </span>
+                        <Crown className="h-4 w-4 text-[#f5dc82]" />
+                      </div>
                     </div>
                     <p className="mt-2 truncate font-display text-lg font-bold text-[#f8e6a0]">
                       {seasonAwards.mostFirst.player}
                     </p>
                     <p className="mt-0.5 font-mono text-xs text-neutral-300">
-                      {seasonAwards.mostFirst.first} × 1st Place · {seasonAwards.mostFirst.points} pts
+                      {seasonAwards.mostFirst.first} × 1st Place · +3 Bonus Pts
                     </p>
                   </motion.div>
 
@@ -641,11 +675,16 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     transition={{ duration: 0.35, delay: 0.06 }}
                     className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-4 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
                         Clutch Qualifier
                       </span>
-                      <Award className="h-4 w-4 text-emerald-300" />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[10px] font-bold text-emerald-200">
+                          +3 pts
+                        </span>
+                        <Award className="h-4 w-4 text-emerald-300" />
+                      </div>
                     </div>
                     <p className="mt-2 truncate font-display text-lg font-bold text-white">
                       {seasonAwards.bestQual.player}
@@ -656,7 +695,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                             (seasonAwards.bestQual.qualified /
                               seasonAwards.bestQual.totalQuizzes) *
                               100
-                          )}% Qualified (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes})`
+                          )}% Qual (${seasonAwards.bestQual.qualified}/${seasonAwards.bestQual.totalQuizzes}) · +3 Bonus`
                         : '—'}
                     </p>
                   </motion.div>
@@ -669,11 +708,16 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     transition={{ duration: 0.35, delay: 0.12 }}
                     className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-4 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
                         Podium Regularity
                       </span>
-                      <Sparkles className="h-4 w-4 text-slate-200" />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[10px] font-bold text-slate-200">
+                          +3 pts
+                        </span>
+                        <Sparkles className="h-4 w-4 text-slate-200" />
+                      </div>
                     </div>
                     <p className="mt-2 truncate font-display text-lg font-bold text-slate-100">
                       {seasonAwards.mostPodiums.player}
@@ -682,9 +726,9 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                       {seasonAwards.mostPodiums.first +
                         seasonAwards.mostPodiums.second +
                         seasonAwards.mostPodiums.third}{' '}
-                      Top-3 Podiums ({seasonAwards.mostPodiums.first}G ·{' '}
+                      Top-3 ({seasonAwards.mostPodiums.first}G ·{' '}
                       {seasonAwards.mostPodiums.second}S ·{' '}
-                      {seasonAwards.mostPodiums.third}B)
+                      {seasonAwards.mostPodiums.third}B) · +3 Bonus
                     </p>
                   </motion.div>
                 </div>
@@ -921,7 +965,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                               {row.qualified}
                             </td>
                             <td className="py-4 pr-5 text-right font-mono text-base font-bold text-[#f0cb65]">
-                              {row.points}
+                              <span>{row.points}</span>
+                              {(awardBonusMap.get(row.player) || 0) > 0 && (
+                                <span
+                                  title={`Includes +${awardBonusMap.get(row.player)} Season Honors bonus`}
+                                  className="ml-1 text-[10px] font-semibold text-emerald-300"
+                                >
+                                  (+{awardBonusMap.get(row.player)})
+                                </span>
+                              )}
                             </td>
                           </motion.tr>
                         ))}
@@ -965,6 +1017,11 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           </div>
                           <span className="shrink-0 font-mono text-sm font-bold text-[#f0cb65]">
                             {row.points} pts
+                            {(awardBonusMap.get(row.player) || 0) > 0 && (
+                              <span className="ml-1 text-[10px] font-semibold text-emerald-300">
+                                (+{awardBonusMap.get(row.player)})
+                              </span>
+                            )}
                           </span>
                         </div>
 
