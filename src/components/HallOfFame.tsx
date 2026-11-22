@@ -102,8 +102,8 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [lightbox, selectedQuiz]);
 
-  const seasonAwards = useMemo(() => {
-    const base = computeStandings(quizzes, standingsYear, 'points');
+  const computeAwardsForFilter = (yearFilter: string) => {
+    const base = computeStandings(quizzes, yearFilter, 'points');
     if (base.length === 0) return null;
 
     const mostFirst = [...base].sort(
@@ -128,19 +128,38 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     })[0];
 
     return { mostFirst, bestQual, mostPodiums };
-  }, [quizzes, standingsYear]);
+  };
+
+  const seasonAwards = useMemo(
+    () => computeAwardsForFilter(standingsYear),
+    [quizzes, standingsYear]
+  );
 
   const awardBonusMap = useMemo(() => {
     const map = new Map<string, number>();
-    if (!seasonAwards) return map;
-    const grant = (player: string) =>
-      map.set(player, (map.get(player) || 0) + 3);
+    const grantAwards = (awards: ReturnType<typeof computeAwardsForFilter>) => {
+      if (!awards) return;
+      const grant = (player: string) =>
+        map.set(player, (map.get(player) || 0) + 3);
+      grant(awards.mostFirst.player);
+      grant(awards.bestQual.player);
+      grant(awards.mostPodiums.player);
+    };
 
-    grant(seasonAwards.mostFirst.player);
-    grant(seasonAwards.bestQual.player);
-    grant(seasonAwards.mostPodiums.player);
+    if (standingsYear === 'all') {
+      grantAwards(seasonAwards);
+      const allYears = Array.from(
+        new Set([...bsYears, ...quizzes.map((q) => q.yearBS).filter(Boolean)])
+      );
+      for (const yr of allYears) {
+        grantAwards(computeAwardsForFilter(yr));
+      }
+    } else {
+      grantAwards(seasonAwards);
+    }
+
     return map;
-  }, [seasonAwards]);
+  }, [quizzes, bsYears, standingsYear, seasonAwards]);
 
   const standings = useMemo(() => {
     const base = computeStandings(quizzes, standingsYear, standingsSort);
@@ -595,7 +614,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                   <p className="mt-1.5 text-xs text-neutral-400">
                     Ranked by Points, then oldest 1st quiz played, then D-first
                     alphabetical order · 1st (6) · 2nd (5) · 3rd (4) · 4th (3) ·
-                    5th (2) · 6th (1) · NQ (0)
+                    5th (2) · 6th (1) · NQ (0) · +3 pts per Season &amp; All-Time Honor
                   </p>
                 </div>
 
