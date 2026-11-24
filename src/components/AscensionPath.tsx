@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   Crown,
+  Download,
   Flame,
   Gavel,
   Lock,
@@ -19,11 +20,13 @@ import {
   User as UserIcon,
   Users,
   X,
+  ZoomIn,
 } from 'lucide-react';
 import {
   AchievementDef,
   AscensionSubTab,
   AuctionItem,
+  CertificateRecord,
   DqrUser,
   LevelRange,
   PastWinnerRecord,
@@ -39,6 +42,7 @@ import {
 } from '../data/presets';
 import { TitleBadge } from './TitleBadge';
 import { WeeklySummaryModal } from './WeeklySummaryModal';
+import { CertificateRenderer, exportCertificateToPng } from './CertificateRenderer';
 import { uploadDqrMedia } from '../lib/supabase';
 import { isEndOfWeek } from '../utils/weeklyHelpers';
 import { DethroneAlert } from '../utils/territoryHelpers';
@@ -53,6 +57,7 @@ interface AscensionPathProps {
   achievements: AchievementDef[];
   auctions: AuctionItem[];
   pastWinners: PastWinnerRecord[];
+  certificates: CertificateRecord[];
   weeklyTracker: UserWeeklyTracker;
   onDismissWeeklySummary: (userId: string, weekStartIso: string) => void;
   onLevelUp: (userId: string, xpCost: number) => void;
@@ -96,6 +101,7 @@ export function AscensionPath({
   achievements,
   auctions,
   pastWinners,
+  certificates,
   weeklyTracker,
   onDismissWeeklySummary,
   onLevelUp,
@@ -117,6 +123,7 @@ export function AscensionPath({
     null
   );
   const [reportZoomOpen, setReportZoomOpen] = useState(false);
+  const [zoomedCert, setZoomedCert] = useState<CertificateRecord | null>(null);
   const [weeklyModalOpen, setWeeklyModalOpen] = useState(false);
   const [weeklyFocusIso, setWeeklyFocusIso] = useState<string | null>(null);
 
@@ -221,6 +228,7 @@ export function AscensionPath({
     { id: 'achievements', label: 'Achievements' },
     { id: 'report-cards', label: 'Report Cards' },
     { id: 'past-winners', label: 'Past Winners' },
+    { id: 'certificates', label: 'Certificates' },
   ];
 
   return (
@@ -1455,6 +1463,110 @@ export function AscensionPath({
               </div>
             </motion.div>
           )}
+
+          {/* ================= 9. CERTIFICATES ================= */}
+          {subTab === 'certificates' && (
+            <motion.div
+              key="certificates"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              className="space-y-6"
+            >
+              {(() => {
+                const myCertificates = certificates
+                  .filter((c) => c.userId === currentUser.id)
+                  .sort((a, b) => b.updatedAt - a.updatedAt);
+
+                return (
+                  <div className="rounded-3xl border border-[#d4af37]/30 bg-[#140d24] p-6 sm:p-8">
+                    <div className="flex flex-col justify-between gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end">
+                      <div>
+                        <p className="font-mono text-[11px] tracking-[0.2em] text-[#d4af37] uppercase">
+                          Official Credentials Archive
+                        </p>
+                        <h2 className="mt-1 font-display text-2xl font-bold text-white sm:text-3xl">
+                          Certificates &amp; Honors
+                        </h2>
+                        <p className="mt-1 text-xs text-[#d4cbe8]">
+                          Signed academic, territorial, and Ascension distinctions issued directly to {currentUser.fullName}.
+                        </p>
+                      </div>
+                      <span className="font-mono text-xs font-semibold text-[#fde68a]">
+                        {myCertificates.length} Issued
+                      </span>
+                    </div>
+
+                    {myCertificates.length === 0 ? (
+                      <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-[#0b0714] px-6 py-12 text-center">
+                        <Award className="mx-auto h-8 w-8 text-[#d4af37]/60" />
+                        <p className="mt-3 font-display text-lg font-semibold text-white">
+                          No Certificates Issued Yet
+                        </p>
+                        <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-[#c4b5fd]/80">
+                          When administration awards you a District Honor, Rank Patent, Streak Milestone, or Territory Writ, it will appear here ready for inspection and download.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                        {myCertificates.map((cert) => (
+                          <div
+                            key={cert.id}
+                            className="group flex flex-col overflow-hidden rounded-2xl border border-[#d4af37]/30 bg-[#0b0714] p-4 transition-all hover:border-[#d4af37]/70"
+                          >
+                            <div
+                              onClick={() => setZoomedCert(cert)}
+                              className="relative cursor-pointer overflow-hidden rounded-xl"
+                            >
+                              <CertificateRenderer certificate={cert} />
+                              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover:bg-black/35 group-hover:opacity-100">
+                                <span className="inline-flex items-center gap-1.5 rounded-xl border border-[#d4af37]/60 bg-[#0b0714]/90 px-3.5 py-2 text-xs font-semibold text-[#fde68a]">
+                                  <ZoomIn className="h-3.5 w-3.5" />
+                                  <span>Inspect Certificate</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-1">
+                              <div className="min-w-0">
+                                <p className="truncate font-display text-base font-bold text-white">
+                                  {cert.titleText}
+                                </p>
+                                <p className="truncate font-mono text-[11px] text-[#c4b5fd]/80">
+                                  {cert.category} · {cert.dateText} · {cert.serialText}
+                                </p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setZoomedCert(cert)}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 px-3 py-1.5 text-xs font-semibold text-white hover:border-[#d4af37]/50 cursor-pointer"
+                                >
+                                  <ZoomIn className="h-3.5 w-3.5" />
+                                  <span>View</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void exportCertificateToPng(cert);
+                                    showMsg('Downloading high-resolution PNG certificate...');
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#d4af37] px-3.5 py-1.5 text-xs font-bold text-[#0b0714] hover:bg-[#fde047] cursor-pointer"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                  <span>Download PNG</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -1594,6 +1706,60 @@ export function AscensionPath({
               alt="Report card enlarged"
               className="max-h-[90vh] max-w-4xl rounded-2xl object-contain"
             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* CERTIFICATE FULLSCREEN INSPECT MODAL */}
+      <AnimatePresence>
+        {zoomedCert && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setZoomedCert(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm sm:p-8"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-5xl space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/15 bg-[#120b20]/95 px-4 py-3 text-white">
+                <div>
+                  <p className="font-display text-base font-bold text-[#fde68a]">
+                    {zoomedCert.titleText}
+                  </p>
+                  <p className="font-mono text-[11px] text-[#c4b5fd]">
+                    Issued to {zoomedCert.recipientName} · {zoomedCert.serialText}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void exportCertificateToPng(zoomedCert)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#d4af37] px-4 py-2 text-xs font-bold text-[#0b0714] hover:bg-[#fde047] cursor-pointer"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Download PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoomedCert(null)}
+                    className="rounded-xl border border-white/15 p-2 text-white/75 hover:bg-white/10 hover:text-white cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <CertificateRenderer
+                certificate={zoomedCert}
+                className="rounded-2xl border border-[#d4af37]/40"
+              />
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
