@@ -370,7 +370,115 @@ export type AscensionSubTab =
   | 'profile'
   | 'achievements'
   | 'report-cards'
-  | 'past-winners';
+  | 'past-winners'
+  | 'certificates';
+
+/* ================= CERTIFICATES ================= */
+
+export type CertificateBorderStyle =
+  | 'imperial-double'
+  | 'ornate-filigree'
+  | 'architectural-hairline'
+  | 'art-deco'
+  | 'royal-crest'
+  | 'parchment-framed';
+
+export type CertificateSealStyle =
+  | 'gold-foil'
+  | 'wax-stamp'
+  | 'laurel-wreath'
+  | 'crown-crest'
+  | 'minimal-monogram'
+  | 'none';
+
+export type CertificateSignatureMode = 'text' | 'drawn' | 'none';
+
+export interface CertificateTypographyConfig {
+  titleFont: string;
+  recipientFont: string;
+  bodyFont: string;
+  metaFont: string;
+  titleScale: number; // 0.8 - 1.35
+  recipientScale: number; // 0.8 - 1.35
+  bodyScale: number; // 0.85 - 1.25
+  uppercaseTitle: boolean;
+}
+
+export interface CertificatePaletteConfig {
+  bgPrimary: string;
+  bgSecondary: string;
+  borderColor: string;
+  accentColor: string;
+  titleColor: string;
+  recipientColor: string;
+  textColor: string;
+  sealColor: string;
+}
+
+export interface CertificateSignatureConfig {
+  enabled: boolean;
+  mode: CertificateSignatureMode;
+  signatureText: string;
+  signatureFont: string;
+  signatureColor: string;
+  drawnDataUrl: string | null;
+  signatoryName: string;
+  signatoryRole: string;
+  secondaryEnabled: boolean;
+  secondarySignatureText: string;
+  secondarySignatoryName: string;
+  secondarySignatoryRole: string;
+}
+
+export interface CertificateRecord {
+  id: string;
+  userId: string;
+  presetId: string;
+  presetName: string;
+  category: string;
+  institutionText: string;
+  ribbonText: string;
+  titleText: string;
+  subtitleText: string;
+  recipientName: string;
+  bodyText: string;
+  achievementText: string;
+  dateText: string;
+  serialText: string;
+  sealStyle: CertificateSealStyle;
+  sealInitials: string;
+  sealCaption: string;
+  borderStyle: CertificateBorderStyle;
+  palette: CertificatePaletteConfig;
+  typography: CertificateTypographyConfig;
+  signature: CertificateSignatureConfig;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CertificatePreset {
+  id: string;
+  name: string;
+  category: string;
+  institutionText: string;
+  ribbonText: string;
+  titleText: string;
+  subtitleText: string;
+  bodyText: string;
+  achievementText: string;
+  sealStyle: CertificateSealStyle;
+  sealInitials: string;
+  sealCaption: string;
+  borderStyle: CertificateBorderStyle;
+  palette: CertificatePaletteConfig;
+  typography: CertificateTypographyConfig;
+  signatureDefaults: {
+    signatureText: string;
+    signatureFont: string;
+    signatoryName: string;
+    signatoryRole: string;
+  };
+}
 export type SystemSubTab =
   | 'overview'
   | 'communication'
