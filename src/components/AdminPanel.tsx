@@ -21,6 +21,7 @@ import {
   AdminSubTab,
   ArchivedNewspaperEdition,
   AuctionItem,
+  CertificateRecord,
   ConfidenceLevel,
   DqrUser,
   EgoReport,
@@ -51,6 +52,7 @@ import { POSITION_OPTIONS } from '../data/initialData';
 import { COLOR_WHEEL_PRESETS, FIFTY_TITLE_PRESETS } from '../data/presets';
 import { FounderGoldenSilhouette } from './Crowns';
 import { TitleBadge } from './TitleBadge';
+import { AdminCertificateStudio } from './AdminCertificateStudio';
 import { SUPABASE_URL, uploadDqrMedia } from '../lib/supabase';
 
 interface AdminPanelProps {
@@ -86,6 +88,8 @@ interface AdminPanelProps {
   pastWinners: PastWinnerRecord[];
   onAddPastWinner: (pw: PastWinnerRecord) => void;
   onDeletePastWinner: (id: string) => void;
+  certificates: CertificateRecord[];
+  onSaveCertificates: (next: CertificateRecord[]) => void;
   territories: Territory[];
   onSaveTerritories: (next: Territory[]) => void;
   newspaper: NewspaperEdition;
@@ -142,6 +146,8 @@ export function AdminPanel(props: AdminPanelProps) {
     pastWinners,
     onAddPastWinner,
     onDeletePastWinner,
+    certificates,
+    onSaveCertificates,
     territories,
     onSaveTerritories,
     newspaper,
@@ -221,7 +227,7 @@ export function AdminPanel(props: AdminPanelProps) {
 
   /* ---- 3. ASCENSION PATH STATE ---- */
   const [ascAdminSub, setAscAdminSub] = useState<
-    'user-stats' | 'ranks' | 'levels' | 'streaks' | 'titles' | 'auctions'
+    'user-stats' | 'ranks' | 'levels' | 'streaks' | 'titles' | 'auctions' | 'certificates'
   >('user-stats');
   const [targetUserId, setTargetUserId] = useState(users[0]?.id || '');
   const targetUser = users.find((u) => u.id === targetUserId) || users[0];
@@ -1089,6 +1095,7 @@ export function AdminPanel(props: AdminPanelProps) {
                   { id: 'streaks', label: 'Streak Bands' },
                   { id: 'titles', label: 'Title Studio & Gift' },
                   { id: 'auctions', label: 'Auctions & Past Winners' },
+                  { id: 'certificates', label: 'Certificates & Seals' },
                 ] as const
               ).map((sub) => (
                 <button
@@ -2008,6 +2015,16 @@ export function AdminPanel(props: AdminPanelProps) {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Certificates Studio & User Assignment */}
+            {ascAdminSub === 'certificates' && (
+              <AdminCertificateStudio
+                users={users}
+                certificates={certificates}
+                onSaveCertificates={onSaveCertificates}
+                onToast={showToast}
+              />
             )}
           </div>
         )}
