@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Crown,
   FilterX,
+  Flame,
   Image as ImageIcon,
   Layers,
   MapPin,
@@ -16,6 +17,7 @@ import {
   Sparkles,
   Star,
   Swords,
+  TrendingUp,
   Trophy,
   Users,
   X,
@@ -53,7 +55,9 @@ interface LightboxState {
 }
 
 export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
-  const [subTab, setSubTab] = useState<HofSubTab | 'head-to-head'>('standings');
+  const [subTab, setSubTab] = useState<
+    HofSubTab | 'head-to-head' | 'era-streaks'
+  >('standings');
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   // Standings filters
@@ -80,11 +84,17 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
   const [h2hPlayerA, setH2hPlayerA] = useState<string>('');
   const [h2hPlayerB, setH2hPlayerB] = useState<string>('');
 
+  // Player Career Profile modal
+  const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<string | null>(
+    null
+  );
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (lightbox) setLightbox(null);
         else if (selectedQuiz) setSelectedQuiz(null);
+        else if (selectedCareerPlayer) setSelectedCareerPlayer(null);
       }
       if (lightbox && e.key === 'ArrowRight') {
         setLightbox((prev) =>
@@ -107,7 +117,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [lightbox, selectedQuiz]);
+  }, [lightbox, selectedQuiz, selectedCareerPlayer]);
 
   const computeAwardsForFilter = (yearFilter: string) => {
     const normalizedFilter = yearFilter.trim();
@@ -394,14 +404,12 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
       let qualified = 0;
       let notQualified = 0;
       let totalQuizzes = 0;
-      let ratingSum = 0;
       const list: QuizRecord[] = [];
 
       for (const q of scoped) {
         const played = q.players.some((p) => p.trim().toLowerCase() === target);
         if (!played) continue;
         totalQuizzes += 1;
-        ratingSum += q.rating || 0;
         list.push(q);
         if (q.position === 'Not Qualified') {
           notQualified += 1;
@@ -419,8 +427,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
         totalQuizzes > 0 ? Math.round((qualified / totalQuizzes) * 100) : 0;
       const podiumRate =
         totalQuizzes > 0 ? Math.round((podiums / totalQuizzes) * 100) : 0;
-      const avgRating =
-        totalQuizzes > 0 ? Number((ratingSum / totalQuizzes).toFixed(1)) : 0;
 
       return {
         name: playerName,
@@ -434,7 +440,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
         totalQuizzes,
         qualRate,
         podiumRate,
-        avgRating,
         quizzes: list,
       };
     };
@@ -467,6 +472,316 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
 
     return { a, b, sharedQuizzes, sharedWins, sharedPodiums, sharedQualRate };
   }, [quizzes, h2hYear, h2hPlayerA, h2hPlayerB]);
+
+  const careerProfile = useMemo(() => {
+    if (!selectedCareerPlayer) return null;
+    const target = selectedCareerPlayer.trim().toLowerCase();
+    const playedQuizzes = quizzes
+      .filter((q) => q.players.some((p) => p.trim().toLowerCase() === target))
+      .sort(
+        (a, b) =>
+          (b.yearBS || '').localeCompare(a.yearBS || '') ||
+          (b.createdAt || 0) - (a.createdAt || 0)
+      );
+
+    let first = 0;
+    let second = 0;
+    let third = 0;
+    let fourth = 0;
+    let fifth = 0;
+    let sixth = 0;
+    let notQualified = 0;
+    let qualified = 0;
+
+    const yearSet = new Set<string>();
+    const partnerMap = new Map<
+      string,
+      { name: string; shared: number; podiums: number; wins: number; qualified: number }
+    >();
+    const hostMap = new Map<
+      string,
+      { host: string; total: number; podiums: number; wins: number }
+    >();
+
+    for (const q of playedQuizzes) {
+      if (q.yearBS?.trim()) yearSet.add(q.yearBS.trim());
+      const isQual = q.position !== 'Not Qualified';
+      const isPodium =
+        q.position === '1st' || q.position === '2nd' || q.position === '3rd';
+      const isWin = q.position === '1st';
+
+      if (isQual) qualified += 1;
+      switch (q.position) {
+        case '1st':
+          first += 1;
+          break;
+        case '2nd':
+          second += 1;
+          break;
+        case '3rd':
+          third += 1;
+          break;
+        case '4th':
+          fourth += 1;
+          break;
+        case '5th':
+          fifth += 1;
+          break;
+        case '6th':
+          sixth += 1;
+          break;
+        default:
+          notQualified += 1;
+          break;
+      }
+
+      if (q.host?.trim()) {
+        const hostKey = q.host.trim();
+        const existingHost = hostMap.get(hostKey) || {
+          host: hostKey,
+          total: 0,
+          podiums: 0,
+          wins: 0,
+        };
+        existingHost.total += 1;
+        if (isPodium) existingHost.podiums += 1;
+        if (isWin) existingHost.wins += 1;
+        hostMap.set(hostKey, existingHost);
+      }
+
+      const uniqueTeammates = Array.from(
+        new Set(q.players.map((p) => p.trim()).filter(Boolean))
+      );
+      for (const mate of uniqueTeammates) {
+        if (mate.toLowerCase() === target) continue;
+        const mateKey = mate.toLowerCase();
+        const existingMate = partnerMap.get(mateKey) || {
+          name: mate,
+          shared: 0,
+          podiums: 0,
+          wins: 0,
+          qualified: 0,
+        };
+        existingMate.shared += 1;
+        if (isQual) existingMate.qualified += 1;
+        if (isPodium) existingMate.podiums += 1;
+        if (isWin) existingMate.wins += 1;
+        partnerMap.set(mateKey, existingMate);
+      }
+    }
+
+    const totalQuizzes = playedQuizzes.length;
+    const podiums = first + second + third;
+    const qualRate =
+      totalQuizzes > 0 ? Math.round((qualified / totalQuizzes) * 100) : 0;
+    const podiumRate =
+      totalQuizzes > 0 ? Math.round((podiums / totalQuizzes) * 100) : 0;
+    const activeYears = Array.from(yearSet).sort();
+
+    const bestPartner =
+      Array.from(partnerMap.values()).sort(
+        (a, b) =>
+          b.podiums - a.podiums ||
+          b.wins - a.wins ||
+          b.qualified - a.qualified ||
+          b.shared - a.shared
+      )[0] || null;
+
+    const topHost =
+      Array.from(hostMap.values()).sort(
+        (a, b) =>
+          b.wins - a.wins || b.podiums - a.podiums || b.total - a.total
+      )[0] || null;
+
+    return {
+      name: selectedCareerPlayer,
+      totalQuizzes,
+      qualified,
+      notQualified,
+      first,
+      second,
+      third,
+      fourth,
+      fifth,
+      sixth,
+      podiums,
+      qualRate,
+      podiumRate,
+      activeYears,
+      bestPartner,
+      topHost,
+      quizzes: playedQuizzes,
+    };
+  }, [quizzes, selectedCareerPlayer]);
+
+  const eraProgressionData = useMemo(() => {
+    const chrono = [...quizzes].sort(
+      (a, b) =>
+        (a.yearBS || '').trim().localeCompare((b.yearBS || '').trim()) ||
+        (a.createdAt || 0) - (b.createdAt || 0)
+    );
+
+    let bestQualStreak = 0;
+    let runningQual = 0;
+    let bestPodiumStreak = 0;
+    let runningPodium = 0;
+    let bestGoldStreak = 0;
+    let runningGold = 0;
+
+    for (const q of chrono) {
+      const isQual = q.position !== 'Not Qualified';
+      const isPodium =
+        q.position === '1st' || q.position === '2nd' || q.position === '3rd';
+      const isGold = q.position === '1st';
+
+      if (isQual) {
+        runningQual += 1;
+        if (runningQual > bestQualStreak) bestQualStreak = runningQual;
+      } else {
+        runningQual = 0;
+      }
+
+      if (isPodium) {
+        runningPodium += 1;
+        if (runningPodium > bestPodiumStreak) bestPodiumStreak = runningPodium;
+      } else {
+        runningPodium = 0;
+      }
+
+      if (isGold) {
+        runningGold += 1;
+        if (runningGold > bestGoldStreak) bestGoldStreak = runningGold;
+      } else {
+        runningGold = 0;
+      }
+    }
+
+    const currentQualStreak = runningQual;
+    const currentPodiumStreak = runningPodium;
+
+    const allYearKeys = Array.from(
+      new Set(
+        [...bsYears, ...quizzes.map((q) => q.yearBS)]
+          .map((y) => (y || '').trim())
+          .filter(Boolean)
+      )
+    ).sort();
+
+    const eras = allYearKeys.map((yr) => {
+      const yrQuizzes = chrono.filter(
+        (q) => (q.yearBS || '').trim() === yr
+      );
+      const first = yrQuizzes.filter((q) => q.position === '1st').length;
+      const second = yrQuizzes.filter((q) => q.position === '2nd').length;
+      const third = yrQuizzes.filter((q) => q.position === '3rd').length;
+      const podiums = first + second + third;
+      const qualified = yrQuizzes.filter(
+        (q) => q.position !== 'Not Qualified'
+      ).length;
+      const total = yrQuizzes.length;
+      const qualRate = total > 0 ? Math.round((qualified / total) * 100) : 0;
+      const podiumRate = total > 0 ? Math.round((podiums / total) * 100) : 0;
+
+      const yrStandings = computeStandings(yrQuizzes, 'all', 'points');
+      const standout = yrStandings[0] || null;
+
+      return {
+        year: yr,
+        total,
+        first,
+        second,
+        third,
+        podiums,
+        qualified,
+        qualRate,
+        podiumRate,
+        standoutPlayer: standout ? standout.player : null,
+      };
+    });
+
+    const bestSeason =
+      [...eras]
+        .filter((e) => e.total > 0)
+        .sort(
+          (a, b) =>
+            b.first - a.first ||
+            b.podiums - a.podiums ||
+            b.qualRate - a.qualRate
+        )[0] || null;
+
+    const playerStreaks = uniquePlayers
+      .map((player) => {
+        const target = player.trim().toLowerCase();
+        const pQuizzes = chrono.filter((q) =>
+          q.players.some((p) => p.trim().toLowerCase() === target)
+        );
+        let pBestQual = 0;
+        let pRunQual = 0;
+        let pBestPod = 0;
+        let pRunPod = 0;
+        let pBestGold = 0;
+        let pRunGold = 0;
+
+        for (const q of pQuizzes) {
+          const isQual = q.position !== 'Not Qualified';
+          const isPod =
+            q.position === '1st' ||
+            q.position === '2nd' ||
+            q.position === '3rd';
+          const isGold = q.position === '1st';
+
+          if (isQual) {
+            pRunQual += 1;
+            if (pRunQual > pBestQual) pBestQual = pRunQual;
+          } else {
+            pRunQual = 0;
+          }
+
+          if (isPod) {
+            pRunPod += 1;
+            if (pRunPod > pBestPod) pBestPod = pRunPod;
+          } else {
+            pRunPod = 0;
+          }
+
+          if (isGold) {
+            pRunGold += 1;
+            if (pRunGold > pBestGold) pBestGold = pRunGold;
+          } else {
+            pRunGold = 0;
+          }
+        }
+
+        return {
+          player,
+          totalQuizzes: pQuizzes.length,
+          currentQualStreak: pRunQual,
+          bestQualStreak: pBestQual,
+          currentPodiumStreak: pRunPod,
+          bestPodiumStreak: pBestPod,
+          bestGoldStreak: pBestGold,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.bestQualStreak - a.bestQualStreak ||
+          b.bestPodiumStreak - a.bestPodiumStreak ||
+          b.currentQualStreak - a.currentQualStreak ||
+          b.totalQuizzes - a.totalQuizzes
+      );
+
+    return {
+      totalQuizzes: chrono.length,
+      bestQualStreak,
+      currentQualStreak,
+      bestPodiumStreak,
+      currentPodiumStreak,
+      bestGoldStreak,
+      eras,
+      bestSeason,
+      playerStreaks,
+    };
+  }, [quizzes, bsYears, uniquePlayers]);
 
   const hasAnyFilter = Boolean(
     filterYear || filterPosition || filterHost || filterPlayer
@@ -639,6 +954,7 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                   { id: 'external-wins', label: 'External Wins' },
                   { id: 'synergy', label: 'Squad Synergy' },
                   { id: 'head-to-head', label: 'Head-to-Head' },
+                  { id: 'era-streaks', label: 'Era & Streaks' },
                 ] as const
               ).map((tab) => {
                 const active = subTab === tab.id;
@@ -943,9 +1259,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         className="flex flex-col items-center text-center"
                       >
                         <SecondSilverCrown className="h-11 w-11 sm:h-12 sm:w-12" />
-                        <p className="mt-2 max-w-full truncate font-display text-sm font-bold text-slate-100 sm:text-base">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedCareerPlayer(podiumTop3[1].player)
+                          }
+                          className="mt-2 max-w-full truncate font-display text-sm font-bold text-slate-100 hover:text-white hover:underline cursor-pointer sm:text-base"
+                        >
                           {podiumTop3[1].player}
-                        </p>
+                        </button>
                         <p className="font-mono text-xs text-slate-300 tabular-nums">
                           {podiumTop3[1].points} pts
                         </p>
@@ -984,9 +1306,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         className="flex flex-col items-center text-center"
                       >
                         <FirstGoldCrown className="h-12 w-12 sm:h-14 sm:w-14" />
-                        <p className="mt-2 max-w-full truncate font-display text-base font-bold text-[#f8e6a0] sm:text-lg">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedCareerPlayer(podiumTop3[0].player)
+                          }
+                          className="mt-2 max-w-full truncate font-display text-base font-bold text-[#f8e6a0] hover:text-white hover:underline cursor-pointer sm:text-lg"
+                        >
                           {podiumTop3[0].player}
-                        </p>
+                        </button>
                         <p className="font-mono text-xs font-semibold text-[#d4af37] tabular-nums">
                           {podiumTop3[0].points} pts
                         </p>
@@ -1023,9 +1351,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         className="flex flex-col items-center text-center"
                       >
                         <ThirdBronzeCrown className="h-10 w-10 sm:h-11 sm:w-11" />
-                        <p className="mt-2 max-w-full truncate font-display text-sm font-bold text-[#f5c08D] sm:text-base">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedCareerPlayer(podiumTop3[2].player)
+                          }
+                          className="mt-2 max-w-full truncate font-display text-sm font-bold text-[#f5c08D] hover:text-white hover:underline cursor-pointer sm:text-base"
+                        >
                           {podiumTop3[2].player}
-                        </p>
+                        </button>
                         <p className="font-mono text-xs text-[#d69560] tabular-nums">
                           {podiumTop3[2].points} pts
                         </p>
@@ -1130,9 +1464,16 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                               </div>
                             </td>
                             <td className="py-4 px-2">
-                              <span className="block truncate font-semibold text-[#f8f5ee] group-hover:text-[#f8e6a0]">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedCareerPlayer(row.player)
+                                }
+                                title="View career profile"
+                                className="block max-w-full truncate text-left font-semibold text-[#f8f5ee] transition-colors hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                              >
                                 {row.player}
-                              </span>
+                              </button>
                             </td>
                             <td className="py-4 text-center font-mono font-semibold text-[#f8e6a0]">
                               {row.first}
@@ -1197,9 +1538,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                             {idx === 2 && (
                               <ThirdBronzeCrown className="h-5 w-5 shrink-0" />
                             )}
-                            <span className="truncate font-display text-base font-bold text-[#f8e6a0]">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedCareerPlayer(row.player)
+                              }
+                              className="truncate text-left font-display text-base font-bold text-[#f8e6a0] hover:underline cursor-pointer"
+                            >
                               {row.player}
-                            </span>
+                            </button>
                           </div>
                           <span className="shrink-0 font-mono text-sm font-bold text-[#f0cb65]">
                             {row.points} pts
@@ -1661,7 +2008,25 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           </span>
                         </div>
                         <h3 className="mt-2 font-display text-lg font-bold text-white">
-                          {pair.playerA} &amp; {pair.playerB}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCareerPlayer(pair.playerA)
+                            }
+                            className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                          >
+                            {pair.playerA}
+                          </button>{' '}
+                          <span className="text-[#d4af37]">&amp;</span>{' '}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCareerPlayer(pair.playerB)
+                            }
+                            className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                          >
+                            {pair.playerB}
+                          </button>
                         </h3>
 
                         <div className="mt-4 grid grid-cols-4 gap-2 text-center font-mono text-xs">
@@ -1743,9 +2108,25 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                               #{idx + 1}
                             </td>
                             <td className="py-3.5 px-2 font-semibold text-white">
-                              {pair.playerA}{' '}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedCareerPlayer(pair.playerA)
+                                }
+                                className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                              >
+                                {pair.playerA}
+                              </button>{' '}
                               <span className="text-[#d4af37]">+</span>{' '}
-                              {pair.playerB}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedCareerPlayer(pair.playerB)
+                                }
+                                className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                              >
+                                {pair.playerB}
+                              </button>
                             </td>
                             <td className="py-3.5 text-center font-mono font-semibold text-[#f8e6a0]">
                               {pair.first}
@@ -1786,7 +2167,25 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                             <span className="mr-2 font-mono text-xs text-[#d4af37]">
                               #{idx + 1}
                             </span>
-                            {pair.playerA} &amp; {pair.playerB}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedCareerPlayer(pair.playerA)
+                              }
+                              className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                            >
+                              {pair.playerA}
+                            </button>{' '}
+                            <span className="text-[#d4af37]">&amp;</span>{' '}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedCareerPlayer(pair.playerB)
+                              }
+                              className="hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                            >
+                              {pair.playerB}
+                            </button>
                           </p>
                           <span className="font-mono text-xs font-bold text-[#f0cb65]">
                             {pair.points} pts
@@ -1848,8 +2247,8 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     Head-to-Head Compare
                   </h2>
                   <p className="mt-1.5 text-xs text-neutral-400">
-                    Compare placements, qualification consistency, quiz ratings,
-                    and shared team chemistry side by side.
+                    Compare placements, qualification consistency, and shared
+                    team chemistry side by side.
                   </p>
                 </div>
 
@@ -1950,9 +2349,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           {h2hData.a.qualRate}% Qualified
                         </span>
                       </div>
-                      <h3 className="mt-1.5 font-display text-2xl font-bold text-[#f8e6a0]">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedCareerPlayer(h2hData.a.name)
+                        }
+                        className="mt-1.5 block text-left font-display text-2xl font-bold text-[#f8e6a0] hover:underline cursor-pointer"
+                      >
                         {h2hData.a.name}
-                      </h3>
+                      </button>
                       <div className="mt-4 grid grid-cols-3 gap-2.5 text-center font-mono text-xs">
                         <div className="rounded-xl border border-[#d4af37]/25 bg-black/35 py-2.5">
                           <span className="block text-[10px] text-neutral-400">
@@ -1972,10 +2377,10 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         </div>
                         <div className="rounded-xl border border-[#d4af37]/25 bg-black/35 py-2.5">
                           <span className="block text-[10px] text-neutral-400">
-                            Avg Rating
+                            Qualified
                           </span>
                           <span className="text-base font-bold text-emerald-300">
-                            {h2hData.a.avgRating}/10
+                            {h2hData.a.qualified}
                           </span>
                         </div>
                       </div>
@@ -1995,9 +2400,15 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                           {h2hData.b.qualRate}% Qualified
                         </span>
                       </div>
-                      <h3 className="mt-1.5 font-display text-2xl font-bold text-white">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedCareerPlayer(h2hData.b.name)
+                        }
+                        className="mt-1.5 block text-left font-display text-2xl font-bold text-white hover:text-sky-200 hover:underline cursor-pointer"
+                      >
                         {h2hData.b.name}
-                      </h3>
+                      </button>
                       <div className="mt-4 grid grid-cols-3 gap-2.5 text-center font-mono text-xs">
                         <div className="rounded-xl border border-sky-400/20 bg-black/35 py-2.5">
                           <span className="block text-[10px] text-neutral-400">
@@ -2017,10 +2428,10 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         </div>
                         <div className="rounded-xl border border-sky-400/20 bg-black/35 py-2.5">
                           <span className="block text-[10px] text-neutral-400">
-                            Avg Rating
+                            Qualified
                           </span>
                           <span className="text-base font-bold text-emerald-300">
-                            {h2hData.b.avgRating}/10
+                            {h2hData.b.qualified}
                           </span>
                         </div>
                       </div>
@@ -2080,12 +2491,6 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                         valA: h2hData.a.podiumRate,
                         valB: h2hData.b.podiumRate,
                         suffix: '%',
-                      },
-                      {
-                        label: 'Average Quiz Rating',
-                        valA: h2hData.a.avgRating,
-                        valB: h2hData.b.avgRating,
-                        suffix: '/10',
                       },
                     ].map((metric, mIdx) => {
                       const total = metric.valA + metric.valB;
@@ -2219,6 +2624,320 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
               )}
             </motion.div>
           )}
+
+          {/* ================= 6. B.S. ERA PROGRESSION & STREAKS SUB-TAB ================= */}
+          {subTab === 'era-streaks' && (
+            <motion.div
+              key="era-streaks"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="rounded-3xl border border-[#d4af37]/40 bg-[#08080a] p-6 text-[#f5f2eb] shadow-[0_24px_80px_rgba(0,0,0,0.65)] sm:p-10"
+            >
+              {/* Header */}
+              <div className="flex flex-col justify-between gap-4 border-b border-[#d4af37]/20 pb-7 sm:flex-row sm:items-end">
+                <div>
+                  <p className="font-mono text-xs tracking-[0.2em] text-[#d4af37] uppercase">
+                    Multi-Year Dynasty &amp; Momentum
+                  </p>
+                  <h2 className="mt-1.5 font-display text-2xl font-bold text-[#f8e6a0] sm:text-3xl">
+                    B.S. Era Progression &amp; Streaks
+                  </h2>
+                  <p className="mt-1.5 text-xs text-neutral-400">
+                    Tracks unbroken qualification runs, consecutive podium
+                    streaks, and year-by-year growth across Bikram Sambat
+                    seasons.
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-2 self-start rounded-xl border border-[#d4af37]/30 bg-[#12110d] px-3.5 py-2 font-mono text-xs font-semibold text-[#f5dc82]">
+                  <TrendingUp className="h-4 w-4 text-[#d4af37]" />
+                  <span>{eraProgressionData.totalQuizzes} Total Quizzes</span>
+                </span>
+              </div>
+
+              {/* Squad Streak Highlights */}
+              <div className="mt-7 grid gap-4 md:grid-cols-3">
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.2 }}
+                  whileHover={{ y: -3 }}
+                  transition={{ duration: 0.35 }}
+                  className="rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#0b1b16] to-[#0b0e0d] p-5 shadow-[0_12px_30px_rgba(16,185,129,0.08)]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-bold tracking-widest text-emerald-300 uppercase">
+                      Qualification Streak
+                    </span>
+                    <Flame className="h-4 w-4 text-emerald-300" />
+                  </div>
+                  <p className="mt-2 font-mono text-3xl font-extrabold text-white">
+                    {eraProgressionData.bestQualStreak}
+                    <span className="ml-2 text-sm font-semibold text-emerald-300">
+                      Quizzes
+                    </span>
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-emerald-200/80">
+                    Current active run:{' '}
+                    {eraProgressionData.currentQualStreak}{' '}
+                    {eraProgressionData.currentQualStreak === 1
+                      ? 'quiz'
+                      : 'quizzes'}
+                  </p>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.2 }}
+                  whileHover={{ y: -3 }}
+                  transition={{ duration: 0.35, delay: 0.06 }}
+                  className="rounded-2xl border border-[#d4af37]/40 bg-gradient-to-br from-[#191409] to-[#0d0c09] p-5 shadow-[0_12px_30px_rgba(212,175,55,0.08)]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-bold tracking-widest text-[#d4af37] uppercase">
+                      Unbroken Podium Run
+                    </span>
+                    <Trophy className="h-4 w-4 text-[#f5dc82]" />
+                  </div>
+                  <p className="mt-2 font-mono text-3xl font-extrabold text-[#f8e6a0]">
+                    {eraProgressionData.bestPodiumStreak}
+                    <span className="ml-2 text-sm font-semibold text-[#d4af37]">
+                      Top-3
+                    </span>
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-neutral-300">
+                    Current podium streak:{' '}
+                    {eraProgressionData.currentPodiumStreak} · Best Gold run:{' '}
+                    {eraProgressionData.bestGoldStreak}
+                  </p>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.2 }}
+                  whileHover={{ y: -3 }}
+                  transition={{ duration: 0.35, delay: 0.12 }}
+                  className="rounded-2xl border border-slate-300/35 bg-gradient-to-br from-[#131822] to-[#0b0d11] p-5 shadow-[0_12px_30px_rgba(203,213,225,0.06)]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-bold tracking-widest text-slate-300 uppercase">
+                      Peak B.S. Season
+                    </span>
+                    <Crown className="h-4 w-4 text-[#f5dc82]" />
+                  </div>
+                  <p className="mt-2 font-display text-2xl font-bold text-white">
+                    {eraProgressionData.bestSeason
+                      ? `${eraProgressionData.bestSeason.year} B.S.`
+                      : 'No Data Yet'}
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-slate-300">
+                    {eraProgressionData.bestSeason
+                      ? `${eraProgressionData.bestSeason.first} Gold · ${eraProgressionData.bestSeason.podiums} Podiums · ${eraProgressionData.bestSeason.qualRate}% Qual`
+                      : 'Add quiz records to track seasons'}
+                  </p>
+                </motion.div>
+              </div>
+
+              {/* Year-by-Year B.S. Era Timeline */}
+              <div className="mt-9">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-mono text-xs font-bold tracking-wider text-[#d4af37] uppercase">
+                    Bikram Sambat Season Timeline
+                  </h3>
+                  <span className="text-[11px] text-neutral-400">
+                    Click any year to open its External Wins
+                  </span>
+                </div>
+
+                {eraProgressionData.eras.length === 0 ? (
+                  <div className="rounded-2xl border border-[#d4af37]/20 bg-[#11100d] p-10 text-center">
+                    <Calendar className="mx-auto h-9 w-9 text-[#d4af37]/60" />
+                    <p className="mt-3 text-sm text-neutral-300">
+                      No Bikram Sambat seasons recorded yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {eraProgressionData.eras.map((era, idx) => (
+                      <motion.button
+                        key={era.year}
+                        type="button"
+                        initial={{ opacity: 0, x: -14 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        viewport={{ once: true, amount: 0.15 }}
+                        whileHover={{ x: 4 }}
+                        transition={{
+                          duration: 0.32,
+                          delay: Math.min(idx * 0.05, 0.25),
+                          ease: [0.16, 1, 0.3, 1],
+                        }}
+                        onClick={() => {
+                          setFilterYear(era.year);
+                          setFilterPosition('');
+                          setFilterHost('');
+                          setFilterPlayer('');
+                          setSubTab('external-wins');
+                        }}
+                        className="group block w-full rounded-2xl border border-[#d4af37]/25 bg-[#0e0d0a] p-5 text-left transition-colors hover:border-[#d4af37]/65 hover:bg-[#14120c] cursor-pointer"
+                      >
+                        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-12 w-20 shrink-0 items-center justify-center rounded-xl border border-[#d4af37]/40 bg-[#19150b] font-mono text-lg font-extrabold text-[#f8e6a0]">
+                              {era.year}
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-display text-lg font-bold text-white group-hover:text-[#f8e6a0]">
+                                  {era.year} B.S. Era
+                                </span>
+                                {era.standoutPlayer && (
+                                  <span className="rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#f5dc82]">
+                                    Standout: {era.standoutPlayer}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 font-mono text-xs text-neutral-400">
+                                {era.total}{' '}
+                                {era.total === 1 ? 'Quiz' : 'Quizzes'} ·{' '}
+                                {era.qualified} Qualified ({era.qualRate}%) ·{' '}
+                                {era.podiums} Top-3 Podiums
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                            <span className="rounded-lg border border-[#d4af37]/35 bg-[#d4af37]/12 px-2.5 py-1 font-bold text-[#f8e6a0]">
+                              {era.first} Gold
+                            </span>
+                            <span className="rounded-lg border border-slate-300/25 bg-slate-300/10 px-2.5 py-1 text-slate-200">
+                              {era.second} Silver
+                            </span>
+                            <span className="rounded-lg border border-[#b86b35]/35 bg-[#b86b35]/12 px-2.5 py-1 text-[#f5c08D]">
+                              {era.third} Bronze
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Animated Era Bars */}
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <div className="mb-1 flex justify-between font-mono text-[10px] text-neutral-400">
+                              <span>Qualification Rate</span>
+                              <span className="text-emerald-300">
+                                {era.qualRate}%
+                              </span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                whileInView={{ width: `${era.qualRate}%` }}
+                                viewport={{ once: true, amount: 0.2 }}
+                                transition={{ duration: 0.55, delay: 0.08 }}
+                                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-300"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-1 flex justify-between font-mono text-[10px] text-neutral-400">
+                              <span>Podium Rate (1st–3rd)</span>
+                              <span className="text-[#f5dc82]">
+                                {era.podiumRate}%
+                              </span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                whileInView={{ width: `${era.podiumRate}%` }}
+                                viewport={{ once: true, amount: 0.2 }}
+                                transition={{ duration: 0.55, delay: 0.14 }}
+                                className="h-full rounded-full bg-gradient-to-r from-[#b8861b] to-[#f8e6a0]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Player Streak Leaderboard */}
+              {eraProgressionData.playerStreaks.length > 0 && (
+                <div className="mt-9">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-mono text-xs font-bold tracking-wider text-[#d4af37] uppercase">
+                      Individual Player Streak Records
+                    </h3>
+                    <span className="text-[11px] text-neutral-400">
+                      Click any player for full career dossier
+                    </span>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {eraProgressionData.playerStreaks.map((ps, idx) => (
+                      <motion.div
+                        key={ps.player}
+                        initial={{ opacity: 0, y: 12 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.15 }}
+                        transition={{
+                          duration: 0.3,
+                          delay: Math.min(idx * 0.04, 0.2),
+                        }}
+                        className="rounded-2xl border border-[#d4af37]/25 bg-[#0d0c09] p-4 transition-colors hover:border-[#d4af37]/55"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCareerPlayer(ps.player)
+                            }
+                            className="truncate text-left font-display text-base font-bold text-[#f8e6a0] hover:underline cursor-pointer"
+                          >
+                            {ps.player}
+                          </button>
+                          <span className="shrink-0 font-mono text-[11px] text-neutral-400">
+                            {ps.totalQuizzes} Quizzes
+                          </span>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-center font-mono text-xs">
+                          <div className="rounded-lg bg-white/5 py-2">
+                            <span className="block text-[10px] text-emerald-300">
+                              Best Qual
+                            </span>
+                            <span className="font-bold text-white">
+                              {ps.bestQualStreak}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-white/5 py-2">
+                            <span className="block text-[10px] text-[#f5dc82]">
+                              Best Podium
+                            </span>
+                            <span className="font-bold text-white">
+                              {ps.bestPodiumStreak}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-white/5 py-2">
+                            <span className="block text-[10px] text-sky-300">
+                              Active Qual
+                            </span>
+                            <span className="font-bold text-white">
+                              {ps.currentQualStreak}
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -2296,9 +3015,21 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                     <Users className="h-4 w-4" />
                     <span>Participating Players</span>
                   </div>
-                  <p className="mt-1.5 text-sm font-medium text-[#f5f5f0]">
-                    {selectedQuiz.players.join(', ')}
-                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedQuiz.players.map((pl) => (
+                      <button
+                        key={pl}
+                        type="button"
+                        onClick={() => {
+                          setSelectedQuiz(null);
+                          setSelectedCareerPlayer(pl.trim());
+                        }}
+                        className="rounded-lg border border-[#d4af37]/30 bg-[#08192f] px-2.5 py-1 text-xs font-medium text-[#f5f5f0] transition-colors hover:border-[#f0cb65] hover:text-[#f8e6a0] cursor-pointer"
+                      >
+                        {pl}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-[#0b2340] p-4">
@@ -2447,6 +3178,301 @@ export function HallOfFame({ bsYears, quizzes, gallery }: HallOfFameProps) {
                 <p className="mt-1 text-xs text-neutral-300">
                   {lightbox.photos[lightbox.index].subtitle}
                 </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* PLAYER CAREER PROFILE MODAL */}
+      <AnimatePresence>
+        {careerProfile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedCareerPlayer(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#d4af37]/50 bg-[#081526] p-6 text-white shadow-[0_28px_90px_rgba(0,0,0,0.8)] sm:p-8"
+            >
+              {/* Career Header */}
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 pb-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#d4af37]/50 bg-gradient-to-br from-[#2a1f0a] to-[#0d1a2d] shadow-inner">
+                    <Crown className="h-7 w-7 text-[#f5dc82]" />
+                  </div>
+                  <div>
+                    <p className="font-mono text-[11px] font-bold tracking-[0.18em] text-[#d4af37] uppercase">
+                      District Quiz Career Dossier
+                    </p>
+                    <h3 className="mt-1 font-display text-2xl font-bold text-[#f8e6a0] sm:text-3xl">
+                      {careerProfile.name}
+                    </h3>
+                    <p className="mt-1 font-mono text-xs text-neutral-300">
+                      {careerProfile.activeYears.length > 0
+                        ? `Active Seasons: ${careerProfile.activeYears.join(' · ')} B.S.`
+                        : 'No recorded seasons'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {uniquePlayers.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetName = careerProfile.name;
+                        const other =
+                          uniquePlayers.find(
+                            (p) =>
+                              p.toLowerCase() !== targetName.toLowerCase()
+                          ) || targetName;
+                        setH2hPlayerA(targetName);
+                        if (
+                          h2hPlayerB.toLowerCase() === targetName.toLowerCase()
+                        ) {
+                          setH2hPlayerB(other);
+                        }
+                        setSelectedCareerPlayer(null);
+                        setSubTab('head-to-head');
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#d4af37]/45 bg-[#d4af37]/15 px-3 py-2 text-xs font-semibold text-[#f8e6a0] transition-colors hover:bg-[#d4af37]/25 cursor-pointer"
+                    >
+                      <Swords className="h-3.5 w-3.5" />
+                      <span>Compare Head-to-Head</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCareerPlayer(null)}
+                    aria-label="Close career profile"
+                    className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white cursor-pointer"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 Career Summary Tiles */}
+              <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-[#0c1d33] p-4">
+                  <p className="font-mono text-[10px] tracking-wider text-neutral-400 uppercase">
+                    Quizzes Played
+                  </p>
+                  <p className="mt-1.5 font-mono text-2xl font-bold text-white">
+                    {careerProfile.totalQuizzes}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-emerald-400/25 bg-[#0b1f1c] p-4">
+                  <p className="font-mono text-[10px] tracking-wider text-emerald-300 uppercase">
+                    Qualifications
+                  </p>
+                  <p className="mt-1.5 font-mono text-2xl font-bold text-emerald-200">
+                    {careerProfile.qualified}
+                    <span className="ml-1.5 text-xs font-normal text-emerald-300/80">
+                      ({careerProfile.qualRate}%)
+                    </span>
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#d4af37]/30 bg-[#1a160a] p-4">
+                  <p className="font-mono text-[10px] tracking-wider text-[#d4af37] uppercase">
+                    Top-3 Podiums
+                  </p>
+                  <p className="mt-1.5 font-mono text-2xl font-bold text-[#f8e6a0]">
+                    {careerProfile.podiums}
+                    <span className="ml-1.5 text-xs font-normal text-[#f5dc82]/80">
+                      ({careerProfile.podiumRate}%)
+                    </span>
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[#f5dc82]/35 bg-[#1d1708] p-4">
+                  <p className="font-mono text-[10px] tracking-wider text-[#f5dc82] uppercase">
+                    Gold Wins (1st)
+                  </p>
+                  <p className="mt-1.5 font-mono text-2xl font-bold text-[#fff2b8]">
+                    {careerProfile.first}
+                  </p>
+                </div>
+              </div>
+
+              {/* Placement Breakdown */}
+              <div className="mt-6 rounded-2xl border border-white/10 bg-[#0b192c] p-5">
+                <p className="font-mono text-[11px] font-bold tracking-wider text-[#d4af37] uppercase">
+                  Career Placement Breakdown
+                </p>
+                <div className="mt-3.5 grid grid-cols-4 gap-2.5 text-center font-mono text-xs sm:grid-cols-7">
+                  {[
+                    {
+                      label: '1st',
+                      val: careerProfile.first,
+                      cls: 'border-[#d4af37]/50 bg-[#d4af37]/15 text-[#f8e6a0]',
+                    },
+                    {
+                      label: '2nd',
+                      val: careerProfile.second,
+                      cls: 'border-slate-300/35 bg-slate-300/10 text-slate-100',
+                    },
+                    {
+                      label: '3rd',
+                      val: careerProfile.third,
+                      cls: 'border-[#b86b35]/45 bg-[#b86b35]/15 text-[#f5c08D]',
+                    },
+                    {
+                      label: '4th',
+                      val: careerProfile.fourth,
+                      cls: 'border-white/15 bg-white/5 text-neutral-200',
+                    },
+                    {
+                      label: '5th',
+                      val: careerProfile.fifth,
+                      cls: 'border-white/15 bg-white/5 text-neutral-200',
+                    },
+                    {
+                      label: '6th',
+                      val: careerProfile.sixth,
+                      cls: 'border-white/15 bg-white/5 text-neutral-200',
+                    },
+                    {
+                      label: 'NQ',
+                      val: careerProfile.notQualified,
+                      cls: 'border-rose-400/20 bg-rose-500/10 text-rose-200',
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className={`rounded-xl border py-2.5 ${item.cls}`}
+                    >
+                      <span className="block text-[10px] opacity-80">
+                        {item.label}
+                      </span>
+                      <span className="mt-0.5 block text-base font-bold">
+                        {item.val}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Best Partner & Strongest Host */}
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-400/25 bg-[#0a1815] p-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                    <Users className="h-4 w-4" />
+                    <span>Best Teammate Chemistry</span>
+                  </div>
+                  {careerProfile.bestPartner ? (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedCareerPlayer(
+                            careerProfile.bestPartner!.name
+                          )
+                        }
+                        className="font-display text-lg font-bold text-white hover:text-[#f8e6a0] hover:underline cursor-pointer"
+                      >
+                        {careerProfile.bestPartner.name}
+                      </button>
+                      <p className="mt-0.5 font-mono text-xs text-neutral-300">
+                        {careerProfile.bestPartner.shared} Shared Quizzes ·{' '}
+                        {careerProfile.bestPartner.podiums} Podiums ·{' '}
+                        {careerProfile.bestPartner.wins} Gold
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-neutral-400">
+                      No teammate records yet.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-[#d4af37]/25 bg-[#121622] p-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[#f5dc82]">
+                    <MapPin className="h-4 w-4" />
+                    <span>Strongest Host / Organizer</span>
+                  </div>
+                  {careerProfile.topHost ? (
+                    <div className="mt-2">
+                      <p className="truncate font-display text-lg font-bold text-white">
+                        {careerProfile.topHost.host}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-neutral-300">
+                        {careerProfile.topHost.total} Appearances ·{' '}
+                        {careerProfile.topHost.podiums} Podiums ·{' '}
+                        {careerProfile.topHost.wins} Gold
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-neutral-400">
+                      No host data yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Chronological Quiz History */}
+              <div className="mt-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="font-mono text-[11px] font-bold tracking-wider text-[#d4af37] uppercase">
+                    Competition Timeline ({careerProfile.quizzes.length})
+                  </p>
+                  <span className="text-[11px] text-neutral-400">
+                    Click any quiz to inspect
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {careerProfile.quizzes.map((qz) => (
+                    <button
+                      key={qz.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCareerPlayer(null);
+                        setSelectedQuiz(qz);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0c1d33] p-3.5 text-left transition-colors hover:border-[#d4af37]/55 hover:bg-[#112745] cursor-pointer"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <PositionCrownOrEmblem
+                          position={qz.position}
+                          className="h-9 w-9 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate font-display text-sm font-bold text-white">
+                            {qz.quizName}
+                          </p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-neutral-300">
+                            {qz.yearBS} B.S. · {qz.host}
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-lg border px-2.5 py-1 font-mono text-[11px] font-bold ${
+                          qz.position === '1st'
+                            ? 'border-[#d4af37]/50 bg-[#d4af37]/15 text-[#f8e6a0]'
+                            : qz.position === '2nd'
+                              ? 'border-slate-300/40 bg-slate-300/10 text-slate-200'
+                              : qz.position === '3rd'
+                                ? 'border-[#b86b35]/50 bg-[#b86b35]/15 text-[#f5c08D]'
+                                : qz.position === 'Not Qualified'
+                                  ? 'border-white/15 bg-white/5 text-neutral-400'
+                                  : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+                        }`}
+                      >
+                        {qz.position === 'Not Qualified'
+                          ? 'NQ'
+                          : qz.position}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </motion.div>
           </motion.div>
